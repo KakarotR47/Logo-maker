@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BookmarkCheck,
   CreditCard,
+  FolderPlus,
   Grid3x3,
   Maximize2,
   Redo2,
@@ -58,6 +60,9 @@ interface LogoCanvasEditorProps {
   onNudgeSelected: (dx: number, dy: number) => void;
   onSendToVisitingCard: () => void;
   onOpenWizard: () => void;
+  onSaveProject?: () => void;
+  activeProjectName?: string | null;
+  autoSaveState?: 'saved' | 'saving';
 }
 
 export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
@@ -79,6 +84,9 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onNudgeSelected,
   onSendToVisitingCard,
   onOpenWizard,
+  onSaveProject,
+  activeProjectName,
+  autoSaveState = 'saved',
 }) => {
   const [zoom, setZoom] = useState<number>(1);
   const [showGrid, setShowGrid] = useState<boolean>(true);
@@ -88,8 +96,48 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
 
+  const viewportRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const interactionRef = useRef<InteractionState | null>(null);
+  const svgRectRef = useRef<DOMRect | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const pendingPointerRef = useRef<{ clientX: number; clientY: number; shiftKey: boolean } | null>(
+    null
+  );
+  const lastMarqueeIdsRef = useRef<string>('');
+  const userAdjustedZoomRef = useRef<boolean>(false);
+
+  // Keep latest reactive values in a ref so window listeners bind once without thrashing
+  const latestRef = useRef({
+    doc,
+    snapEnabled,
+    showGrid,
+    selectedLayerIds,
+    editingTextId,
+    onSelectLayers,
+    onPreviewLayersChange,
+    onCommitLayersChange,
+    onUndo,
+    onRedo,
+    onDeleteSelected,
+    onDuplicateSelected,
+    onNudgeSelected,
+  });
+  latestRef.current = {
+    doc,
+    snapEnabled,
+    showGrid,
+    selectedLayerIds,
+    editingTextId,
+    onSelectLayers,
+    onPreviewLayersChange,
+    onCommitLayersChange,
+    onUndo,
+    onRedo,
+    onDeleteSelected,
+    onDuplicateSelected,
+    onNudgeSelected,
+  };
 
   const selectedSet = useMemo(() => new Set(selectedLayerIds), [selectedLayerIds]);
   const selectedLayers = useMemo(
@@ -118,16 +166,56 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     };
   }, [selectedLayers]);
 
-  const singleSelected =
-    selectedLayers.length === 1 ? selectedLayers[0] : null;
+  const singleSelected = selectedLayers.length === 1 ? selectedLayers[0] : null;
+
+  const computeFitZoom = useCallback(
+    (containerW: number) => {
+      const horizontalPad = containerW < 640 ? 28 : 72;
+      const availableW = Math.max(220, containerW - horizontalPad);
+      return Math.min(1, Math.max(0.28, +(availableW / Math.max(1, doc.width)).toFixed(2)));
+    },
+    [doc.width]
+  );
+
+  const handleFitZoom = useCallback(() => {
+    userAdjustedZoomRef.current = false;
+    const el = viewportRef.current;
+    if (!el) {
+      setZoom(1);
+      return;
+    }
+    setZoom(computeFitZoom(el.clientWidth));
+  }, [computeFitZoom]);
+
+  // Responsive auto-fit on mobile/tablet viewports via ResizeObserver
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const applyResponsiveFit = () => {
+      if (userAdjustedZoomRef.current) return;
+      const fit = computeFitZoom(el.clientWidth);
+      setZoom(fit);
+    };
+
+    applyResponsiveFit();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      applyResponsiveFit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [computeFitZoom]);
 
   const clientToArtboard = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const rect = svg.getBoundingClientRect();
+    const rect = svgRectRef.current ?? svg?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+    const currentDoc = latestRef.current.doc;
     return {
-      x: ((clientX - rect.left) / rect.width) * doc.width,
-      y: ((clientY - rect.top) / rect.height) * doc.height,
+      x: ((clientX - rect.left) / rect.width) * currentDoc.width,
+      y: ((clientY - rect.top) / rect.height) * currentDoc.height,
     };
   };
 
@@ -137,11 +225,12 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     dx: number,
     dy: number
   ): { snappedDx: number; snappedDy: number; guides: SnapGuide[] } => {
+    const { doc: curDoc, snapEnabled: snapOn, showGrid: gridOn } = latestRef.current;
     let nx = movingBox.x + dx;
     let ny = movingBox.y + dy;
     const guides: SnapGuide[] = [];
 
-    if (!snapEnabled) {
+    if (!snapOn) {
       return {
         snappedDx: Math.round(dx),
         snappedDy: Math.round(dy),
@@ -150,10 +239,10 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     }
 
     const threshold = 7;
-    const xTargets: number[] = [doc.width / 2, 40, doc.width - 40];
-    const yTargets: number[] = [doc.height / 2, 40, doc.height - 40];
+    const xTargets: number[] = [curDoc.width / 2, 40, curDoc.width - 40];
+    const yTargets: number[] = [curDoc.height / 2, 40, curDoc.height - 40];
 
-    for (const other of doc.layers) {
+    for (const other of curDoc.layers) {
       if (excludedIds.has(other.id) || !other.visible) continue;
       xTargets.push(other.x, other.x + other.width / 2, other.x + other.width);
       yTargets.push(other.y, other.y + other.height / 2, other.y + other.height);
@@ -197,11 +286,11 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
       }
     }
 
-    if (!snappedX && showGrid) {
+    if (!snappedX && gridOn) {
       const gx = Math.round(nx / 10) * 10;
       if (Math.abs(nx - gx) < 3) nx = gx;
     }
-    if (!snappedY && showGrid) {
+    if (!snappedY && gridOn) {
       const gy = Math.round(ny / 10) * 10;
       if (Math.abs(ny - gy) < 3) ny = gy;
     }
@@ -213,19 +302,31 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     };
   };
 
-  useEffect(() => {
-    if (!interaction) return;
+  const isInteracting = interaction !== null;
 
-    const handlePointerMove = (e: PointerEvent) => {
+  // Bind pointermove/pointerup/pointercancel ONLY once per drag gesture & throttle with rAF
+  useEffect(() => {
+    if (!isInteracting) return;
+
+    const flushPointerMove = () => {
+      rafIdRef.current = null;
+      const pointer = pendingPointerRef.current;
       const st = interactionRef.current;
-      if (!st) return;
+      if (!pointer || !st) return;
 
       const svg = svgRef.current;
       if (!svg) return;
-      const rect = svg.getBoundingClientRect();
+      const rect = svgRectRef.current ?? svg.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+
+      const {
+        doc: curDoc,
+        onSelectLayers: selectLayers,
+        onPreviewLayersChange: previewLayers,
+      } = latestRef.current;
 
       if (st.mode === 'marquee' && st.marqueeStart) {
-        const pt = clientToArtboard(e.clientX, e.clientY);
+        const pt = clientToArtboard(pointer.clientX, pointer.clientY);
         const box: MarqueeBox = {
           startX: st.marqueeStart.x,
           startY: st.marqueeStart.y,
@@ -240,7 +341,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         const rh = Math.abs(box.endY - box.startY);
 
         if (rw > 4 || rh > 4) {
-          const hits = doc.layers
+          const hits = curDoc.layers
             .filter(
               (l) =>
                 l.visible &&
@@ -251,15 +352,19 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 l.y + l.height > ry
             )
             .map((l) => l.id);
-          onSelectLayers(hits);
+          const signature = hits.join(',');
+          if (signature !== lastMarqueeIdsRef.current) {
+            lastMarqueeIdsRef.current = signature;
+            selectLayers(hits);
+          }
         }
         return;
       }
 
-      const scaleX = doc.width / rect.width;
-      const scaleY = doc.height / rect.height;
-      const dx = (e.clientX - st.startClientX) * scaleX;
-      const dy = (e.clientY - st.startClientY) * scaleY;
+      const scaleX = curDoc.width / rect.width;
+      const scaleY = curDoc.height / rect.height;
+      const dx = (pointer.clientX - st.startClientX) * scaleX;
+      const dy = (pointer.clientY - st.startClientY) * scaleY;
 
       if (st.mode === 'drag') {
         const initialList = Object.values(st.initialLayersMap);
@@ -294,7 +399,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         }
         st.currentLayersMap = nextMap;
         setSnapGuides(guides);
-        onPreviewLayersChange(nextMap);
+        previewLayers(nextMap);
       } else if (st.mode === 'resize' && st.primaryLayerId && st.handle) {
         const base = st.initialLayersMap[st.primaryLayerId];
         if (!base) return;
@@ -317,7 +422,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         }
 
         const keepAspect =
-          e.shiftKey ||
+          pointer.shiftKey ||
           ((base.type === 'icon' || base.type === 'custom-svg') && h.length === 2);
 
         if (keepAspect && base.height > 0) {
@@ -333,15 +438,15 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           height: Math.round(height),
         };
         st.currentLayersMap = { [base.id]: updated };
-        onPreviewLayersChange(st.currentLayersMap);
+        previewLayers(st.currentLayersMap);
       } else if (st.mode === 'rotate' && st.primaryLayerId) {
         const base = st.initialLayersMap[st.primaryLayerId];
         if (!base) return;
-        const pt = clientToArtboard(e.clientX, e.clientY);
+        const pt = clientToArtboard(pointer.clientX, pointer.clientY);
         const cx = base.x + base.width / 2;
         const cy = base.y + base.height / 2;
         let deg = (Math.atan2(pt.y - cy, pt.x - cx) * 180) / Math.PI + 90;
-        if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+        if (pointer.shiftKey) deg = Math.round(deg / 15) * 15;
         else deg = Math.round(deg);
 
         const updated: LogoLayer = {
@@ -349,11 +454,31 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           rotation: ((deg % 360) + 360) % 360,
         };
         st.currentLayersMap = { [base.id]: updated };
-        onPreviewLayersChange(st.currentLayersMap);
+        previewLayers(st.currentLayersMap);
       }
     };
 
-    const handlePointerUp = () => {
+    const handlePointerMove = (e: PointerEvent) => {
+      pendingPointerRef.current = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        shiftKey: e.shiftKey,
+      };
+      if (rafIdRef.current === null) {
+        rafIdRef.current = window.requestAnimationFrame(flushPointerMove);
+      }
+    };
+
+    const handlePointerFinish = () => {
+      if (rafIdRef.current !== null) {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+        flushPointerMove();
+      }
+      pendingPointerRef.current = null;
+      svgRectRef.current = null;
+      lastMarqueeIdsRef.current = '';
+
       const st = interactionRef.current;
       if (st && st.mode !== 'marquee') {
         const hasChange = Object.keys(st.initialLayersMap).some((id) => {
@@ -370,7 +495,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           );
         });
         if (hasChange) {
-          onCommitLayersChange(st.initialLayersMap, st.currentLayersMap);
+          latestRef.current.onCommitLayersChange(st.initialLayersMap, st.currentLayersMap);
         }
       }
       interactionRef.current = null;
@@ -379,85 +504,90 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
       setMarquee(null);
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', handlePointerFinish);
+    window.addEventListener('pointercancel', handlePointerFinish);
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointerup', handlePointerFinish);
+      window.removeEventListener('pointercancel', handlePointerFinish);
+      if (rafIdRef.current !== null) {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      pendingPointerRef.current = null;
+      svgRectRef.current = null;
     };
-  }, [interaction, doc.width, doc.height, doc.layers, snapEnabled, showGrid]);
+  }, [isInteracting]);
 
-  // Keyboard shortcuts: Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, Ctrl+D, Ctrl+A, Delete, Arrows
+  // Keyboard shortcuts: bound once on mount via refs (zero listener churn)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const activeTag = document.activeElement?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
-      if (editingTextId) return;
+      const cur = latestRef.current;
+      if (cur.editingTextId) return;
 
       const mod = e.metaKey || e.ctrlKey;
 
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        if (e.shiftKey) onRedo();
-        else onUndo();
+        if (e.shiftKey) cur.onRedo();
+        else cur.onUndo();
         return;
       }
 
       if (mod && e.key.toLowerCase() === 'y') {
         e.preventDefault();
-        onRedo();
+        cur.onRedo();
         return;
       }
 
       if (mod && e.key.toLowerCase() === 'd') {
         e.preventDefault();
-        onDuplicateSelected();
+        cur.onDuplicateSelected();
         return;
       }
 
       if (mod && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        onSelectLayers(doc.layers.filter((l) => l.visible && !l.locked).map((l) => l.id));
+        cur.onSelectLayers(
+          cur.doc.layers.filter((l) => l.visible && !l.locked).map((l) => l.id)
+        );
         return;
       }
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerIds.length > 0) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && cur.selectedLayerIds.length > 0) {
         e.preventDefault();
-        onDeleteSelected();
+        cur.onDeleteSelected();
         return;
       }
 
-      if (selectedLayerIds.length > 0) {
+      if (cur.selectedLayerIds.length > 0) {
         const step = e.shiftKey ? 10 : 1;
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
-          onNudgeSelected(-step, 0);
+          cur.onNudgeSelected(-step, 0);
         } else if (e.key === 'ArrowRight') {
           e.preventDefault();
-          onNudgeSelected(step, 0);
+          cur.onNudgeSelected(step, 0);
         } else if (e.key === 'ArrowUp') {
           e.preventDefault();
-          onNudgeSelected(0, -step);
+          cur.onNudgeSelected(0, -step);
         } else if (e.key === 'ArrowDown') {
           e.preventDefault();
-          onNudgeSelected(0, step);
+          cur.onNudgeSelected(0, step);
         }
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    editingTextId,
-    selectedLayerIds,
-    doc.layers,
-    onUndo,
-    onRedo,
-    onDeleteSelected,
-    onDuplicateSelected,
-    onNudgeSelected,
-    onSelectLayers,
-  ]);
+  }, []);
+
+  const cacheSvgRect = () => {
+    svgRectRef.current = svgRef.current?.getBoundingClientRect() ?? null;
+  };
 
   const startLayerDrag = (e: React.PointerEvent, layer: LogoLayer) => {
     e.stopPropagation();
@@ -489,6 +619,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
       if (found) initialLayersMap[id] = found;
     }
 
+    cacheSvgRect();
     const state: InteractionState = {
       mode: 'drag',
       primaryLayerId: layer.id,
@@ -502,6 +633,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   };
 
   const startMarqueeSelection = (e: React.PointerEvent) => {
+    cacheSvgRect();
+    lastMarqueeIdsRef.current = '';
     const pt = clientToArtboard(e.clientX, e.clientY);
     if (!e.shiftKey) {
       onSelectLayers([]);
@@ -522,6 +655,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   const startResize = (e: React.PointerEvent, layer: LogoLayer, handle: string) => {
     e.stopPropagation();
     if (layer.locked) return;
+    cacheSvgRect();
     const map = { [layer.id]: layer };
     const state: InteractionState = {
       mode: 'resize',
@@ -539,6 +673,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   const startRotate = (e: React.PointerEvent, layer: LogoLayer) => {
     e.stopPropagation();
     if (layer.locked) return;
+    cacheSvgRect();
     const map = { [layer.id]: layer };
     const state: InteractionState = {
       mode: 'rotate',
@@ -563,61 +698,61 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   return (
     <div className="flex flex-1 flex-col min-w-0 bg-[#ECEAE4]">
       {/* Canvas Top Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#DCD9D0] bg-[#FAF9F6] px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 border-b border-[#DCD9D0] bg-[#FAF9F6] px-3 sm:px-4 py-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={onUndo}
             disabled={!canUndo}
             title="Undo (Ctrl/Cmd+Z)"
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#141413] hover:bg-[#F2F0EA] disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-[#141413] hover:bg-[#F2F0EA] disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
           >
             <Undo2 className="h-3.5 w-3.5" />
-            Undo
+            <span className="hidden sm:inline">Undo</span>
           </button>
           <button
             type="button"
             onClick={onRedo}
             disabled={!canRedo}
             title="Redo (Ctrl/Cmd+Shift+Z)"
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#141413] hover:bg-[#F2F0EA] disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-[#141413] hover:bg-[#F2F0EA] disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
           >
             <Redo2 className="h-3.5 w-3.5" />
-            Redo
+            <span className="hidden sm:inline">Redo</span>
           </button>
 
-          <span className="mx-1 h-4 w-px bg-[#DCD9D0]" aria-hidden="true" />
+          <span className="mx-0.5 hidden sm:inline h-4 w-px bg-[#DCD9D0]" aria-hidden="true" />
 
           <button
             type="button"
             onClick={() => setShowGrid((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2 sm:px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               showGrid
                 ? 'border-[#141413] bg-[#141413] text-white'
                 : 'border-[#DCD9D0] bg-white text-[#3F3E39] hover:bg-[#F2F0EA]'
             }`}
           >
             <Grid3x3 className="h-3.5 w-3.5" />
-            Grid
+            <span className="hidden sm:inline">Grid</span>
           </button>
 
           <button
             type="button"
             onClick={() => setSnapEnabled((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2 sm:px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               snapEnabled
                 ? 'border-[#1B4332] bg-[#1B4332] text-white'
                 : 'border-[#DCD9D0] bg-white text-[#3F3E39] hover:bg-[#F2F0EA]'
             }`}
           >
-            Snap Guides
+            Snap
           </button>
 
-          <span className="mx-1 h-4 w-px bg-[#DCD9D0]" aria-hidden="true" />
+          <span className="mx-0.5 hidden sm:inline h-4 w-px bg-[#DCD9D0]" aria-hidden="true" />
 
-          {/* Artboard Background Color Switcher right in Top Toolbar */}
+          {/* Artboard Background Color Switcher */}
           <div className="flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2 py-1">
-            <span className="text-[11px] font-medium text-[#5C5951]">Canvas:</span>
+            <span className="hidden md:inline text-[11px] font-medium text-[#5C5951]">Canvas:</span>
             {bgSwatches.map((hex) => (
               <button
                 key={hex}
@@ -660,6 +795,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             value={`${doc.width}x${doc.height}`}
             onChange={(e) => {
               const [w, h] = e.target.value.split('x').map(Number);
+              userAdjustedZoomRef.current = false;
               onResizeArtboard(w, h);
             }}
             aria-label="Artboard size preset"
@@ -671,15 +807,37 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           </select>
         </div>
 
-        {/* Right Toolbar: Logo Wizard + Send to Card + Zoom Controls */}
-        <div className="flex items-center gap-2">
+        {/* Right Toolbar: Save Project + Wizard + Card + Zoom */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {onSaveProject && (
+            <button
+              type="button"
+              onClick={onSaveProject}
+              title={
+                activeProjectName
+                  ? `Auto-saving "${activeProjectName}" (Click to snapshot a new copy)`
+                  : 'Save logo to My Projects'
+              }
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-[#F2F0EA] transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {activeProjectName ? (
+                <BookmarkCheck className="h-3.5 w-3.5 text-[#1B4332]" />
+              ) : (
+                <FolderPlus className="h-3.5 w-3.5 text-[#1B4332]" />
+              )}
+              <span className="hidden sm:inline">
+                {activeProjectName ? 'Save Copy' : 'Save Project'}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onOpenWizard}
             className="inline-flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-[#F2F0EA] transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <Wand2 className="h-3.5 w-3.5" />
-            Logo Wizard
+            <span className="hidden md:inline">Logo Wizard</span>
           </button>
 
           <button
@@ -688,24 +846,31 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             className="inline-flex items-center gap-1.5 rounded-md border border-[#1B4332] bg-[#1B4332]/10 px-2.5 py-1.5 text-xs font-semibold text-[#1B4332] hover:bg-[#1B4332] hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <CreditCard className="h-3.5 w-3.5" />
-            Put Logo on Card
+            <span className="hidden xl:inline">Put Logo on Card</span>
+            <span className="xl:hidden">Card</span>
           </button>
 
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.15).toFixed(2)))}
+              onClick={() => {
+                userAdjustedZoomRef.current = true;
+                setZoom((z) => Math.max(0.28, +(z - 0.12).toFixed(2)));
+              }}
               className="rounded-md border border-[#DCD9D0] bg-white p-1.5 text-[#141413] hover:bg-[#F2F0EA] cursor-pointer"
               aria-label="Zoom out"
             >
               <ZoomOut className="h-3.5 w-3.5" />
             </button>
-            <span className="font-mono-num w-11 text-center text-xs font-semibold text-[#141413]">
+            <span className="font-mono-num w-10 text-center text-xs font-semibold text-[#141413]">
               {Math.round(zoom * 100)}%
             </span>
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.min(2.2, +(z + 0.15).toFixed(2)))}
+              onClick={() => {
+                userAdjustedZoomRef.current = true;
+                setZoom((z) => Math.min(2.2, +(z + 0.12).toFixed(2)));
+              }}
               className="rounded-md border border-[#DCD9D0] bg-white p-1.5 text-[#141413] hover:bg-[#F2F0EA] cursor-pointer"
               aria-label="Zoom in"
             >
@@ -713,9 +878,9 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setZoom(1)}
+              onClick={handleFitZoom}
               className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 py-1.5 text-[11px] font-medium text-[#3F3E39] hover:bg-[#F2F0EA] cursor-pointer whitespace-nowrap shrink-0"
-              title="Reset zoom to 100%"
+              title="Fit artboard to viewport"
             >
               <Maximize2 className="h-3 w-3" />
               Fit
@@ -726,7 +891,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
 
       {/* Scrollable Workspace Viewport */}
       <div
-        className="relative flex flex-1 items-center justify-center overflow-auto p-6 sm:p-10"
+        ref={viewportRef}
+        className="relative flex flex-1 items-center justify-center overflow-auto p-3.5 sm:p-6 lg:p-8 min-h-[280px] sm:min-h-[380px]"
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) {
             onSelectLayers([]);
@@ -735,7 +901,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         }}
       >
         <div
-          className="relative shrink-0 shadow-[0_12px_40px_rgba(17,24,39,0.12)] ring-1 ring-black/10 transition-[width,height] duration-150"
+          className="relative shrink-0 shadow-[0_12px_40px_rgba(17,24,39,0.12)] ring-1 ring-black/10"
           style={{
             width: scaledW,
             height: scaledH,
@@ -752,7 +918,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           <svg
             ref={svgRef}
             viewBox={`0 0 ${doc.width} ${doc.height}`}
-            className="h-full w-full select-none block"
+            className="h-full w-full select-none block touch-none"
             onPointerDown={(e) => {
               if (
                 e.target === e.currentTarget ||
@@ -797,7 +963,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                     setEditingTextId(layer.id);
                   }
                 }}
-                style={{ cursor: layer.locked ? 'not-allowed' : 'move' }}
+                style={{ cursor: layer.locked ? 'not-allowed' : 'move', touchAction: 'none' }}
               >
                 <CanvasLayerNode
                   layer={layer}
@@ -922,12 +1088,19 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                     <circle
                       cx={singleSelected.width / 2}
                       cy={-24 / zoom}
+                      r={14 / zoom}
+                      fill="transparent"
+                      style={{ cursor: 'grab', touchAction: 'none' }}
+                      onPointerDown={(e) => startRotate(e, singleSelected)}
+                    />
+                    <circle
+                      cx={singleSelected.width / 2}
+                      cy={-24 / zoom}
                       r={6 / zoom}
                       fill="#FFFFFF"
                       stroke="#2563EB"
                       strokeWidth={1.8 / zoom}
-                      style={{ cursor: 'grab' }}
-                      onPointerDown={(e) => startRotate(e, singleSelected)}
+                      pointerEvents="none"
                     />
 
                     {[
@@ -941,20 +1114,30 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                       { id: 'w', hx: 0, hy: singleSelected.height / 2, cursor: 'ew-resize' },
                     ].map((pt) => {
                       const hs = 9 / zoom;
+                      const hitSize = Math.max(hs, 20 / zoom);
                       return (
-                        <rect
-                          key={pt.id}
-                          x={pt.hx - hs / 2}
-                          y={pt.hy - hs / 2}
-                          width={hs}
-                          height={hs}
-                          rx={1.5 / zoom}
-                          fill="#FFFFFF"
-                          stroke="#2563EB"
-                          strokeWidth={1.5 / zoom}
-                          style={{ cursor: pt.cursor }}
-                          onPointerDown={(e) => startResize(e, singleSelected, pt.id)}
-                        />
+                        <g key={pt.id}>
+                          <rect
+                            x={pt.hx - hitSize / 2}
+                            y={pt.hy - hitSize / 2}
+                            width={hitSize}
+                            height={hitSize}
+                            fill="transparent"
+                            style={{ cursor: pt.cursor, touchAction: 'none' }}
+                            onPointerDown={(e) => startResize(e, singleSelected, pt.id)}
+                          />
+                          <rect
+                            x={pt.hx - hs / 2}
+                            y={pt.hy - hs / 2}
+                            width={hs}
+                            height={hs}
+                            rx={1.5 / zoom}
+                            fill="#FFFFFF"
+                            stroke="#2563EB"
+                            strokeWidth={1.5 / zoom}
+                            pointerEvents="none"
+                          />
+                        </g>
                       );
                     })}
                   </>
@@ -996,12 +1179,22 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         </div>
       </div>
 
-      {/* Helpful Canvas Hint Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#DCD9D0] bg-[#FAF9F6] px-4 py-1.5 text-[11px] text-[#5C5951]">
-        <span>
+      {/* Helpful Canvas Hint & Auto-Save Strip */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#DCD9D0] bg-[#FAF9F6] px-3 sm:px-4 py-1.5 text-[11px] text-[#5C5951]">
+        <span className="hidden md:inline">
           Drag empty canvas for multi-select · Shift+Click layers · Ctrl+D duplicate · Ctrl+Z undo · Del delete
         </span>
-        <div className="flex items-center gap-3 font-mono-num">
+        <span className="md:hidden">
+          Tap layer to edit · Drag handles to resize · Double-tap text
+        </span>
+        <div className="flex items-center gap-3 font-mono-num ml-auto">
+          <span className="text-[#1B4332]">
+            {autoSaveState === 'saving'
+              ? 'Saving...'
+              : activeProjectName
+                ? `${activeProjectName} · Saved`
+                : 'Draft auto-saved'}
+          </span>
           <span>
             {selectedLayerIds.length > 1
               ? `${selectedLayerIds.length} selected`

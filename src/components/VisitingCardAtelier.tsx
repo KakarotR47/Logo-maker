@@ -188,6 +188,33 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
   const [glare, setGlare] = useState({ x: 50, y: 50 });
   const cardStageRef = useRef<HTMLDivElement>(null);
   const dbUploadRef = useRef<HTMLInputElement>(null);
+  const hoverRafRef = useRef<number | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+
+  const scheduleFeedbackClear = (ms: number) => {
+    if (feedbackTimerRef.current !== null) {
+      window.clearTimeout(feedbackTimerRef.current);
+    }
+    feedbackTimerRef.current = window.setTimeout(() => {
+      feedbackTimerRef.current = null;
+      setDbFeedback(null);
+    }, ms);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hoverRafRef.current !== null) {
+        window.cancelAnimationFrame(hoverRafRef.current);
+      }
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   // When user clicks "Send to Visiting Card" from Canvas Editor, import SVG logo onto card seal
   useEffect(() => {
@@ -210,7 +237,7 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
         crestStyle: prev.crestStyle === 'none' ? 'notary-rosette' : prev.crestStyle,
       }));
       setDbFeedback('Canvas logo stamped onto your visiting card seal.');
-      setTimeout(() => setDbFeedback(null), 2600);
+      scheduleFeedbackClear(2600);
     } catch {
       // Ignore error
     }
@@ -227,15 +254,20 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
 
     let frameId = 0;
     const start = performance.now();
+    let lastEmit = 0;
 
+    // Throttle React state updates to ~16fps while CSS transition-transform smoothly interpolates
     const tick = (now: number) => {
-      const t = (now - start) / 1000;
-      const ry = Math.sin(t * 1.1) * 7;
-      const rx = Math.cos(t * 0.85) * 4.5;
-      const gx = Math.round(50 + Math.sin(t * 1.1) * 35);
-      const gy = Math.round(50 + Math.cos(t * 0.85) * 30);
-      setTilt({ rx, ry });
-      setGlare({ x: gx, y: gy });
+      if (now - lastEmit >= 60) {
+        lastEmit = now;
+        const t = (now - start) / 1000;
+        const ry = Math.sin(t * 1.1) * 7;
+        const rx = Math.cos(t * 0.85) * 4.5;
+        const gx = Math.round(50 + Math.sin(t * 1.1) * 35);
+        const gy = Math.round(50 + Math.cos(t * 0.85) * 30);
+        setTilt({ rx, ry });
+        setGlare({ x: gx, y: gy });
+      }
       frameId = requestAnimationFrame(tick);
     };
 
@@ -294,18 +326,29 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
     ) {
       return;
     }
-    const el = cardStageRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / rect.width;
-    const py = (e.clientY - rect.top) / rect.height;
-    const ry = (px - 0.5) * 10;
-    const rx = (0.5 - py) * 8;
-    setTilt({ rx, ry });
-    setGlare({ x: Math.round(px * 100), y: Math.round(py * 100) });
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    if (hoverRafRef.current !== null) return;
+    hoverRafRef.current = window.requestAnimationFrame(() => {
+      hoverRafRef.current = null;
+      const el = cardStageRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const px = (clientX - rect.left) / rect.width;
+      const py = (clientY - rect.top) / rect.height;
+      const ry = (px - 0.5) * 10;
+      const rx = (0.5 - py) * 8;
+      setTilt({ rx, ry });
+      setGlare({ x: Math.round(px * 100), y: Math.round(py * 100) });
+    });
   };
 
   const handleMouseLeave = () => {
+    if (hoverRafRef.current !== null) {
+      window.cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
     if (magic.autoShowcase) return;
     setTilt({ rx: 0, ry: 0 });
     setGlare({ x: 50, y: 50 });
@@ -334,7 +377,11 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
     try {
       await navigator.clipboard.writeText(value);
       setCopiedKey(key);
-      setTimeout(() => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
         setCopiedKey((prev) => (prev === key ? null : prev));
       }, 1800);
     } catch {
@@ -426,7 +473,7 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDbFeedback(`Exported database (${savedPresets.length} saved presets + active card).`);
-    setTimeout(() => setDbFeedback(null), 2600);
+    scheduleFeedbackClear(2600);
   };
 
   const handleImportDatabaseJson = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -464,7 +511,7 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
       } catch {
         setDbFeedback('Could not read file — ensure it is a valid JSON card database.');
       }
-      setTimeout(() => setDbFeedback(null), 3200);
+      scheduleFeedbackClear(3200);
     };
     reader.readAsText(file);
   };

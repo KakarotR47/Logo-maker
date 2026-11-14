@@ -257,7 +257,7 @@ interface RenderLayerProps {
   idPrefix: string;
 }
 
-export const CanvasLayerNode: React.FC<RenderLayerProps> = ({ layer, docBg, idPrefix }) => {
+export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(({ layer, docBg, idPrefix }) => {
   if (!layer.visible) return null;
 
   const cx = layer.x + layer.width / 2;
@@ -313,7 +313,7 @@ export const CanvasLayerNode: React.FC<RenderLayerProps> = ({ layer, docBg, idPr
       <title data-cx={cx} data-cy={cy}>{layer.name}</title>
     </g>
   );
-};
+});
 
 function renderIcon(layer: IconLayer, docBg: string, fillAttr: string) {
   const icon = VECTOR_ICONS.find((ic) => ic.id === layer.iconId) ?? VECTOR_ICONS[0];
@@ -564,7 +564,7 @@ interface DocumentSvgProps {
   forceBackground?: string;
 }
 
-export const LogoDocumentSvg: React.FC<DocumentSvgProps> = ({
+export const LogoDocumentSvg: React.FC<DocumentSvgProps> = React.memo(({
   doc,
   idPrefix,
   className,
@@ -591,4 +591,4 @@ export const LogoDocumentSvg: React.FC<DocumentSvgProps> = ({
       ))}
     </svg>
   );
-};
+});

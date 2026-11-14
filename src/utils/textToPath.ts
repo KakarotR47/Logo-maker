@@ -1,6 +1,6 @@
 import opentype from 'opentype.js';
 import { FONT_OPTIONS } from '../data/logoLibrary';
-import { PathLayer, TextLayer } from '../types/logo';
+import { LogoLayer, PathLayer, TextLayer } from '../types/logo';
 
 const fontCache = new Map<string, Promise<opentype.Font | null>>();
 
@@ -22,13 +22,20 @@ async function loadOpentypeFont(
   }
 
   const promise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
     try {
-      const response = await fetch(fontSpec.ttfUrl, { mode: 'cors' });
+      const response = await fetch(fontSpec.ttfUrl, {
+        mode: 'cors',
+        signal: controller.signal,
+      });
       if (!response.ok) return null;
       const buffer = await response.arrayBuffer();
       return opentype.parse(buffer);
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
     }
   })();
 
@@ -37,24 +44,80 @@ async function loadOpentypeFont(
 }
 
 /**
+ * Attempts to convert a TextLayer to outlined vector paths for clean SVG/PNG export.
+ * If the font TTF cannot be fetched/parsed, preserves the original TextLayer rather than
+ * substituting geometric placeholder bars.
+ */
+export async function tryConvertTextLayerToPath(layer: TextLayer): Promise<LogoLayer> {
+  const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
+  if (!font) return layer;
+  return convertTextLayerToPathWithFont(layer, font);
+}
+
+/**
  * Converts a TextLayer into a true editable vector PathLayer (`<path d="...">`)
  * using opentype.js glyph outlines (supports letter spacing & curve/arc warp!).
  */
 export async function convertTextLayerToPath(layer: TextLayer): Promise<PathLayer> {
+  const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
+  if (font) {
+    return convertTextLayerToPathWithFont(layer, font);
+  }
+  const displayText = layer.uppercase ? layer.text.toUpperCase() : layer.text;
+  const fontSize = Math.max(8, layer.fontSize);
+
+  const fallbackPaths: string[] = [];
+  const charCount = Math.max(1, displayText.length);
+  const blockW = Math.min(layer.width * 0.86, charCount * fontSize * 0.62);
+  const startX = (layer.width - blockW) / 2;
+  const barH = Math.max(8, fontSize * 0.68);
+  const barY = (layer.height - barH) / 2;
+  const step = blockW / charCount;
+  for (let i = 0; i < charCount; i++) {
+    if (displayText[i] === ' ') continue;
+    const x0 = +(startX + i * step + 2).toFixed(1);
+    const w0 = +Math.max(4, step - 5).toFixed(1);
+    fallbackPaths.push(
+      `M${x0} ${barY.toFixed(1)} h${w0} v${barH.toFixed(1)} h-${w0} Z`
+    );
+  }
+
+  return {
+    id: layer.id,
+    name: `${layer.name} (Vector)`,
+    type: 'path',
+    x: layer.x,
+    y: layer.y,
+    width: layer.width,
+    height: layer.height,
+    rotation: layer.rotation,
+    opacity: layer.opacity,
+    visible: layer.visible,
+    locked: layer.locked,
+    fill: layer.fill,
+    fillGradient: layer.fillGradient ? { ...layer.fillGradient } : undefined,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+    shadow: { ...layer.shadow },
+    pathDataList: fallbackPaths,
+    sourceViewBox: { width: layer.width, height: layer.height },
+    sourceText: layer.text,
+  };
+}
+
+function convertTextLayerToPathWithFont(layer: TextLayer, font: opentype.Font): PathLayer {
   const displayText = layer.uppercase ? layer.text.toUpperCase() : layer.text;
   const lines = displayText.split(/\r?\n/);
-  const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
 
   const fontSize = Math.max(8, layer.fontSize);
   const trackingPx = layer.letterSpacing * fontSize;
   const lineAdvance = fontSize * (layer.lineHeight || 1.15);
 
-  if (font) {
-    const pathDataList: string[] = [];
+  const pathDataList: string[] = [];
 
-    lines.forEach((line, lineIdx) => {
-      if (!line) return;
-      const baselineY = fontSize * 0.85 + lineIdx * lineAdvance;
+  lines.forEach((line, lineIdx) => {
+    if (!line) return;
+    const baselineY = fontSize * 0.85 + lineIdx * lineAdvance;
 
       // Measure full line width with letter-spacing
       const glyphs = font.stringToGlyphs(line);
@@ -108,51 +171,9 @@ export async function convertTextLayerToPath(layer: TextLayer): Promise<PathLaye
       }
     });
 
-    if (pathDataList.length > 0) {
-      return {
-        id: layer.id,
-        name: `${layer.name} (Outlined)`,
-        type: 'path',
-        x: layer.x,
-        y: layer.y,
-        width: layer.width,
-        height: layer.height,
-        rotation: layer.rotation,
-        opacity: layer.opacity,
-        visible: layer.visible,
-        locked: layer.locked,
-        fill: layer.fill,
-        fillGradient: layer.fillGradient ? { ...layer.fillGradient } : undefined,
-        stroke: layer.stroke,
-        strokeWidth: layer.strokeWidth,
-        shadow: { ...layer.shadow },
-        pathDataList,
-        sourceViewBox: { width: layer.width, height: layer.height },
-        sourceText: layer.text,
-      };
-    }
-  }
-
-  // Fallback: geometric vector capsule/glyph outline approximation if font fetch blocked
-  const fallbackPaths: string[] = [];
-  const charCount = Math.max(1, displayText.length);
-  const blockW = Math.min(layer.width * 0.86, charCount * fontSize * 0.62);
-  const startX = (layer.width - blockW) / 2;
-  const barH = Math.max(8, fontSize * 0.68);
-  const barY = (layer.height - barH) / 2;
-  const step = blockW / charCount;
-  for (let i = 0; i < charCount; i++) {
-    if (displayText[i] === ' ') continue;
-    const x0 = +(startX + i * step + 2).toFixed(1);
-    const w0 = +Math.max(4, step - 5).toFixed(1);
-    fallbackPaths.push(
-      `M${x0} ${barY.toFixed(1)} h${w0} v${barH.toFixed(1)} h-${w0} Z`
-    );
-  }
-
   return {
     id: layer.id,
-    name: `${layer.name} (Vector)`,
+    name: `${layer.name} (Outlined)`,
     type: 'path',
     x: layer.x,
     y: layer.y,
@@ -167,7 +188,7 @@ export async function convertTextLayerToPath(layer: TextLayer): Promise<PathLaye
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
     shadow: { ...layer.shadow },
-    pathDataList: fallbackPaths,
+    pathDataList,
     sourceViewBox: { width: layer.width, height: layer.height },
     sourceText: layer.text,
   };

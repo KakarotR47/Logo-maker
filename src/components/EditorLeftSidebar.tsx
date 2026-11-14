@@ -203,11 +203,11 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   const layersTopFirst: LogoLayer[] = [...doc.layers].reverse();
 
   return (
-    <aside className="flex w-full lg:w-[310px] shrink-0 border-b lg:border-b-0 lg:border-r border-[#DCD9D0] bg-[#FAF9F6]">
-      {/* Narrow Icon Rail */}
+    <aside className="flex flex-col lg:flex-row w-full lg:w-[310px] shrink-0 border-b lg:border-b-0 lg:border-r border-[#DCD9D0] bg-[#FAF9F6]">
+      {/* Icon Rail: Horizontal bar on mobile/tablet, vertical rail on desktop */}
       <nav
         aria-label="Editor tools"
-        className="flex lg:flex-col items-center gap-1 border-r border-[#EAE7DF] bg-[#F3F1EB] p-1.5"
+        className="flex flex-row lg:flex-col items-center gap-1 border-b lg:border-b-0 lg:border-r border-[#EAE7DF] bg-[#F3F1EB] p-1.5 overflow-x-auto shrink-0"
       >
         {(
           [
@@ -224,7 +224,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
               key={id}
               type="button"
               onClick={() => setActiveTab(id)}
-              className={`flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2.5 w-14 text-[10px] font-semibold transition-colors cursor-pointer ${
+              className={`flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 lg:py-2.5 flex-1 lg:flex-initial min-w-[58px] lg:w-14 text-[10px] font-semibold transition-colors cursor-pointer ${
                 active
                   ? 'bg-[#141413] text-white'
                   : 'text-[#55524B] hover:bg-[#E7E4DC] hover:text-[#141413]'
@@ -238,7 +238,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
       </nav>
 
       {/* Active Tool Drawer */}
-      <div className="flex-1 overflow-y-auto p-3.5 max-h-[520px] lg:max-h-[calc(100vh-110px)]">
+      <div className="flex-1 overflow-y-auto p-3.5 max-h-[380px] sm:max-h-[440px] lg:max-h-[calc(100vh-110px)]">
         {/* TAB 1: VECTORS, SHAPES, DIVIDERS, CUSTOM SVG UPLOAD */}
         {activeTab === 'elements' && (
           <div className="space-y-5">

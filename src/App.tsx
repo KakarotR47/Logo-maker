@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Download } from 'lucide-react';
 import { BrandBriefGrid } from './components/BrandBriefGrid';
 import { BrandKitView } from './components/BrandKitView';
@@ -8,6 +8,7 @@ import { ExportModal } from './components/ExportModal';
 import { LogoCanvasEditor } from './components/LogoCanvasEditor';
 import { LogoWizardModal } from './components/LogoWizardModal';
 import { MockupPreviewView } from './components/MockupPreviewView';
+import { ProjectsDashboard } from './components/ProjectsDashboard';
 import { VisitingCardAtelier } from './components/VisitingCardAtelier';
 import {
   DEFAULT_BRAND_BRIEF,
@@ -23,6 +24,7 @@ import {
   LogoConcept,
   LogoDocument,
   LogoLayer,
+  LogoProject,
   LogoStylePreset,
   SavedBrandKit,
   ShapeKind,
@@ -38,6 +40,13 @@ import {
   resolveFont,
   resolvePalette,
 } from './utils/logoGenerator';
+import {
+  cloneDocumentForProject,
+  loadActiveSession,
+  loadSavedProjects,
+  persistActiveSession,
+  persistSavedProjects,
+} from './utils/projectStorage';
 import { parseUploadedSvgToLayer } from './utils/svgExport';
 import { convertTextLayerToPath } from './utils/textToPath';
 
@@ -50,17 +59,36 @@ interface HistoryState {
 }
 
 export default function App() {
+  const initialSessionRef = useRef<ReturnType<typeof loadActiveSession> | undefined>(
+    undefined
+  );
+  if (initialSessionRef.current === undefined) {
+    initialSessionRef.current = loadActiveSession();
+  }
+  const initialSession = initialSessionRef.current;
+
   const [viewMode, setViewMode] = useState<StudioViewMode>('editor');
-  const [brief, setBrief] = useState<BrandBrief>(DEFAULT_BRAND_BRIEF);
+  const [brief, setBrief] = useState<BrandBrief>(
+    () => initialSession?.brief ?? DEFAULT_BRAND_BRIEF
+  );
   const [concepts, setConcepts] = useState<LogoConcept[]>(() =>
-    generateTwelveLogoConcepts(DEFAULT_BRAND_BRIEF)
+    generateTwelveLogoConcepts(initialSession?.brief ?? DEFAULT_BRAND_BRIEF)
   );
 
   const [history, setHistory] = useState<HistoryState>(() => ({
     past: [],
-    present: buildDocumentForArchetype(DEFAULT_BRAND_BRIEF, 'icon-left'),
+    present:
+      initialSession?.document ??
+      buildDocumentForArchetype(DEFAULT_BRAND_BRIEF, 'icon-left'),
     future: [],
   }));
+
+  const [projects, setProjects] = useState<LogoProject[]>(() => loadSavedProjects());
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+    () => initialSession?.activeProjectId ?? null
+  );
+  const [autoSaveState, setAutoSaveState] = useState<'saved' | 'saving'>('saved');
+  const [mobileEditorPanel, setMobileEditorPanel] = useState<'tools' | 'inspector'>('tools');
 
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [exportOpen, setExportOpen] = useState<boolean>(false);
@@ -82,18 +110,122 @@ export default function App() {
     () => activeDoc.layers.filter((l) => selectedLayerIds.includes(l.id)),
     [activeDoc.layers, selectedLayerIds]
   );
+  const activeProject = useMemo(
+    () => projects.find((p) => p.id === activeProjectId) ?? null,
+    [projects, activeProjectId]
+  );
+
+  // Memoize active font signature so pointer drags don't re-run font loading
+  const activeFontSignature = useMemo(
+    () =>
+      activeDoc.layers
+        .filter((l): l is TextLayer => l.type === 'text')
+        .map((l) => `${l.fontFamily}::${l.fontWeight}`)
+        .join('|'),
+    [activeDoc.layers]
+  );
 
   // Dynamically ensure every Google Font used on the active canvas is loaded
   useEffect(() => {
-    activeDoc.layers.forEach((layer) => {
-      if (layer.type === 'text') {
-        const family = layer.fontFamily.split(',')[0]?.replace(/['"]/g, '').trim();
-        if (family) {
-          void loadGoogleFont(family, [layer.fontWeight, 400, 700]);
-        }
+    if (!activeFontSignature) return;
+    activeFontSignature.split('|').forEach((entry) => {
+      const [fontFamily, rawWeight] = entry.split('::');
+      const family = fontFamily?.split(',')[0]?.replace(/['"]/g, '').trim();
+      const weight = Number(rawWeight) || 400;
+      if (family) {
+        void loadGoogleFont(family, [weight, 400, 700]);
       }
     });
-  }, [activeDoc.layers]);
+  }, [activeFontSignature]);
+
+  // Debounced auto-save for active session + active project (if opened)
+  const latestAutosaveRef = useRef({
+    activeProjectId,
+    brief,
+    activeDoc,
+    projects,
+  });
+  latestAutosaveRef.current = {
+    activeProjectId,
+    brief,
+    activeDoc,
+    projects,
+  };
+  const hasHydratedAutosaveRef = useRef(false);
+
+  useEffect(() => {
+    if (!hasHydratedAutosaveRef.current) {
+      hasHydratedAutosaveRef.current = true;
+      return;
+    }
+
+    setAutoSaveState('saving');
+    const timer = window.setTimeout(() => {
+      const { activeProjectId: pid, brief: b, activeDoc: doc, projects: list } =
+        latestAutosaveRef.current;
+      const now = new Date().toISOString();
+
+      persistActiveSession({
+        activeProjectId: pid,
+        brief: b,
+        document: doc,
+        updatedAt: now,
+      });
+
+      if (pid && list.some((p) => p.id === pid)) {
+        const nextProjects = list.map((p) =>
+          p.id === pid
+            ? {
+                ...p,
+                brief: b,
+                document: doc,
+                updatedAt: now,
+              }
+            : p
+        );
+        setProjects(nextProjects);
+        persistSavedProjects(nextProjects);
+      }
+
+      setAutoSaveState('saved');
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [brief, activeDoc, activeProjectId]);
+
+  // Flush current session synchronously when backgrounding or closing tab
+  useEffect(() => {
+    const flushNow = () => {
+      const { activeProjectId: pid, brief: b, activeDoc: doc, projects: list } =
+        latestAutosaveRef.current;
+      const now = new Date().toISOString();
+      persistActiveSession({
+        activeProjectId: pid,
+        brief: b,
+        document: doc,
+        updatedAt: now,
+      });
+      if (pid && list.some((p) => p.id === pid)) {
+        const nextProjects = list.map((p) =>
+          p.id === pid ? { ...p, brief: b, document: doc, updatedAt: now } : p
+        );
+        persistSavedProjects(nextProjects);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flushNow();
+      }
+    };
+
+    window.addEventListener('pagehide', flushNow);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flushNow);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
   const commitDocument = (nextDoc: LogoDocument) => {
     setHistory((prev) => ({
@@ -663,26 +795,184 @@ export default function App() {
     }
   };
 
+  const handleSaveCurrentAsProject = (customName?: string) => {
+    const now = new Date().toISOString();
+    const resolvedName =
+      customName?.trim() ||
+      activeProject?.name ||
+      brief.businessName?.trim() ||
+      activeDoc.title?.trim() ||
+      `Logo Project ${projects.length + 1}`;
+
+    const newProject: LogoProject = {
+      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: resolvedName,
+      createdAt: now,
+      updatedAt: now,
+      brief: { ...brief },
+      document: { ...activeDoc, title: resolvedName },
+    };
+
+    const next = [newProject, ...projects];
+    setProjects(next);
+    setActiveProjectId(newProject.id);
+    persistSavedProjects(next);
+    persistActiveSession({
+      activeProjectId: newProject.id,
+      brief: newProject.brief,
+      document: newProject.document,
+      updatedAt: now,
+    });
+    setAutoSaveState('saved');
+  };
+
+  const handleNewBlankProject = () => {
+    const blankBrief: BrandBrief = {
+      ...DEFAULT_BRAND_BRIEF,
+      businessName: 'New Brand',
+      tagline: 'DESIGN STUDIO',
+    };
+    const blankDoc: LogoDocument = {
+      id: nextLayerId('doc'),
+      title: 'New Blank Logo',
+      width: 800,
+      height: 600,
+      backgroundColor: '#FAF9F6',
+      transparentBackground: false,
+      layers: [],
+    };
+    setActiveProjectId(null);
+    setBrief(blankBrief);
+    setHistory({ past: [], present: blankDoc, future: [] });
+    setSelectedLayerIds([]);
+    setViewMode('editor');
+  };
+
+  const handleOpenProject = (project: LogoProject) => {
+    setBrief(project.brief);
+    setHistory({
+      past: [],
+      present: project.document,
+      future: [],
+    });
+    setActiveProjectId(project.id);
+    setSelectedLayerIds([]);
+    setViewMode('editor');
+  };
+
+  const handleRenameProject = (id: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
+    const now = new Date().toISOString();
+    const next = projects.map((p) =>
+      p.id === id
+        ? {
+            ...p,
+            name: trimmed,
+            updatedAt: now,
+            document: { ...p.document, title: trimmed },
+          }
+        : p
+    );
+    setProjects(next);
+    persistSavedProjects(next);
+    if (activeProjectId === id) {
+      setHistory((prev) => ({
+        ...prev,
+        present: { ...prev.present, title: trimmed },
+      }));
+    }
+  };
+
+  const handleDuplicateProject = (id: string) => {
+    const source = projects.find((p) => p.id === id);
+    if (!source) return;
+    const now = new Date().toISOString();
+    const copyName = `${source.name} Copy`;
+    const copy: LogoProject = {
+      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: copyName,
+      createdAt: now,
+      updatedAt: now,
+      brief: { ...source.brief },
+      document: cloneDocumentForProject(source.document, copyName),
+    };
+    const next = [copy, ...projects];
+    setProjects(next);
+    persistSavedProjects(next);
+  };
+
+  const handleDeleteProject = (id: string) => {
+    const next = projects.filter((p) => p.id !== id);
+    setProjects(next);
+    persistSavedProjects(next);
+    if (activeProjectId === id) {
+      setActiveProjectId(null);
+    }
+  };
+
+  const handleExportProject = (project: LogoProject) => {
+    setBrief(project.brief);
+    setHistory({
+      past: [],
+      present: project.document,
+      future: [],
+    });
+    setActiveProjectId(project.id);
+    setSelectedLayerIds([]);
+    setExportOpen(true);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F3EF] text-[#141413]">
-      {/* Strict 3-Zone Top Bar Contract */}
+      {/* Responsive Top Navigation Bar */}
       <header className="border-b border-[#DCD9D0] bg-[#FAF9F6]">
-        <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-6 px-4 sm:px-6 py-3">
-          {/* Zone 1: Single-line Brand Wordmark */}
-          <button
-            type="button"
-            onClick={() => setViewMode('editor')}
-            className="font-display text-xl font-bold tracking-tight text-[#141413] whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            Forma Studio
-          </button>
+        <div className="mx-auto flex max-w-[1440px] flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-6 px-4 sm:px-6 py-2.5 md:py-3">
+          {/* Row 1 on Mobile / Zone 1+3 Split */}
+          <div className="flex items-center justify-between gap-3 md:contents">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <button
+                type="button"
+                onClick={() => setViewMode('editor')}
+                className="font-display text-lg sm:text-xl font-bold tracking-tight text-[#141413] whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                Forma Studio
+              </button>
+              <span
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-md bg-[#EFECE4] px-2 py-0.5 text-[10.5px] font-medium text-[#5C5951] whitespace-nowrap"
+                title="Changes auto-save locally to your browser"
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    autoSaveState === 'saving' ? 'bg-amber-500 animate-pulse' : 'bg-[#1B4332]'
+                  }`}
+                />
+                {autoSaveState === 'saving' ? 'Saving…' : 'Saved'}
+              </span>
+            </div>
 
-          {/* Zone 2: Concise Navigation Links */}
-          <nav className="flex items-center gap-5 sm:gap-6 text-xs sm:text-sm font-medium text-[#55524B] overflow-x-auto">
+            <div className="shrink-0 md:order-3">
+              <button
+                type="button"
+                onClick={() => setExportOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#141413] px-3.5 sm:px-4 py-2 text-xs font-semibold text-white hover:bg-[#2A2926] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export Logo
+              </button>
+            </div>
+          </div>
+
+          {/* Zone 2: Concise Navigation Links (scrolls horizontally on mobile/tablet) */}
+          <nav className="flex items-center gap-4 sm:gap-5 lg:gap-6 text-xs sm:text-sm font-medium text-[#55524B] overflow-x-auto pb-0.5 md:pb-0 md:order-2">
             {(
               [
                 { id: 'editor', label: 'Canvas Editor' },
                 { id: 'concepts', label: 'Logo Generator' },
+                {
+                  id: 'projects',
+                  label: projects.length > 0 ? `My Projects (${projects.length})` : 'My Projects',
+                },
                 { id: 'mockups', label: 'Preview Mockups' },
                 { id: 'brandkit', label: 'Brand Kit' },
                 { id: 'cards', label: 'Visiting Cards DB' },
@@ -705,89 +995,122 @@ export default function App() {
               );
             })}
           </nav>
-
-          {/* Zone 3: Single Primary Action CTA */}
-          <div className="shrink-0">
-            <button
-              type="button"
-              onClick={() => setExportOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#141413] px-4 py-2 text-xs font-semibold text-white hover:bg-[#2A2926] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export Logo
-            </button>
-          </div>
         </div>
       </header>
 
       {/* Main Workspace */}
       {viewMode === 'editor' && (
         <main className="flex flex-1 flex-col lg:flex-row min-h-0">
-          <EditorLeftSidebar
-            doc={activeDoc}
-            activePalette={activePalette}
-            activeStyle={brief.style}
-            selectedLayerIds={selectedLayerIds}
-            onSelectLayers={setSelectedLayerIds}
-            onAddIcon={handleAddIcon}
-            onAddShape={handleAddShape}
-            onAddDivider={handleAddDivider}
-            onUploadCustomSvg={handleUploadCustomSvg}
-            onAddText={handleAddText}
-            onApplyFontPairing={handleApplyFontPairing}
-            onApplyFontToSelectedOrPrimary={handleApplyFontToSelectedOrPrimary}
-            onApplyPalette={handleApplyPalette}
-            onSwitchLayout={handleSwitchLayout}
-            onSwitchStyle={handleSwitchStyle}
-            onToggleLayerVisible={handleToggleLayerVisible}
-            onToggleLayerLock={handleToggleLayerLock}
-            onReorderLayer={handleReorderLayer}
-            onDuplicateLayer={handleDuplicateLayer}
-            onDeleteLayer={handleDeleteLayer}
-          />
+          {/* Mobile/Tablet Panel Switcher (visible below Canvas on < lg screens) */}
+          <div className="order-2 lg:hidden flex items-center justify-between gap-2 border-y border-[#DCD9D0] bg-[#EFECE4] px-3 py-2">
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-[#E2DFD7] p-0.5 flex-1">
+              <button
+                type="button"
+                onClick={() => setMobileEditorPanel('tools')}
+                className={`rounded-md py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  mobileEditorPanel === 'tools'
+                    ? 'bg-white text-[#141413] shadow-xs'
+                    : 'text-[#55524B] hover:text-[#141413]'
+                }`}
+              >
+                Vectors, Type &amp; Layers
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileEditorPanel('inspector')}
+                className={`rounded-md py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  mobileEditorPanel === 'inspector'
+                    ? 'bg-white text-[#141413] shadow-xs'
+                    : 'text-[#55524B] hover:text-[#141413]'
+                }`}
+              >
+                Inspector{selectedLayers.length > 0 ? ` (${selectedLayers.length})` : ''}
+              </button>
+            </div>
+          </div>
 
-          <LogoCanvasEditor
-            doc={activeDoc}
-            activePalette={activePalette}
-            selectedLayerIds={selectedLayerIds}
-            onSelectLayers={setSelectedLayerIds}
-            onPreviewLayersChange={handlePreviewLayersChange}
-            onCommitLayersChange={handleCommitLayersChange}
-            onUpdateTextLive={handleUpdateTextLive}
-            onUpdateDocBackground={(backgroundColor, transparentBackground) =>
-              commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
-            }
-            onResizeArtboard={handleResizeArtboard}
-            canUndo={history.past.length > 0}
-            canRedo={history.future.length > 0}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
-            onDeleteSelected={handleDeleteSelected}
-            onDuplicateSelected={handleDuplicateSelected}
-            onNudgeSelected={handleNudgeSelected}
-            onSendToVisitingCard={() => {
-              setIncomingLogoNonce((n) => n + 1);
-              setViewMode('cards');
-            }}
-            onOpenWizard={() => setWizardOpen(true)}
-          />
+          <div
+            className={`${
+              mobileEditorPanel === 'tools' ? 'block' : 'hidden'
+            } lg:flex order-3 lg:order-1 min-w-0`}
+          >
+            <EditorLeftSidebar
+              doc={activeDoc}
+              activePalette={activePalette}
+              activeStyle={brief.style}
+              selectedLayerIds={selectedLayerIds}
+              onSelectLayers={setSelectedLayerIds}
+              onAddIcon={handleAddIcon}
+              onAddShape={handleAddShape}
+              onAddDivider={handleAddDivider}
+              onUploadCustomSvg={handleUploadCustomSvg}
+              onAddText={handleAddText}
+              onApplyFontPairing={handleApplyFontPairing}
+              onApplyFontToSelectedOrPrimary={handleApplyFontToSelectedOrPrimary}
+              onApplyPalette={handleApplyPalette}
+              onSwitchLayout={handleSwitchLayout}
+              onSwitchStyle={handleSwitchStyle}
+              onToggleLayerVisible={handleToggleLayerVisible}
+              onToggleLayerLock={handleToggleLayerLock}
+              onReorderLayer={handleReorderLayer}
+              onDuplicateLayer={handleDuplicateLayer}
+              onDeleteLayer={handleDeleteLayer}
+            />
+          </div>
 
-          <EditorInspector
-            doc={activeDoc}
-            activePalette={activePalette}
-            selectedLayers={selectedLayers}
-            onUpdateLayer={handleUpdateLayer}
-            onAlignSelectedLayers={handleAlignSelectedLayers}
-            onBatchUpdateSelected={handleBatchUpdateSelected}
-            onApplyFontPairing={handleApplyFontPairing}
-            onDuplicateSelected={handleDuplicateSelected}
-            onDeleteSelected={handleDeleteSelected}
-            onUpdateDocBackground={(backgroundColor, transparentBackground) =>
-              commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
-            }
-            onReorderLayer={handleReorderLayer}
-            onConvertTextToPath={handleConvertTextToPath}
-          />
+          <div className="order-1 lg:order-2 flex-1 flex flex-col min-w-0 min-h-[380px] sm:min-h-[460px] lg:min-h-0">
+            <LogoCanvasEditor
+              doc={activeDoc}
+              activePalette={activePalette}
+              selectedLayerIds={selectedLayerIds}
+              onSelectLayers={setSelectedLayerIds}
+              onPreviewLayersChange={handlePreviewLayersChange}
+              onCommitLayersChange={handleCommitLayersChange}
+              onUpdateTextLive={handleUpdateTextLive}
+              onUpdateDocBackground={(backgroundColor, transparentBackground) =>
+                commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
+              }
+              onResizeArtboard={handleResizeArtboard}
+              canUndo={history.past.length > 0}
+              canRedo={history.future.length > 0}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              onDeleteSelected={handleDeleteSelected}
+              onDuplicateSelected={handleDuplicateSelected}
+              onNudgeSelected={handleNudgeSelected}
+              onSendToVisitingCard={() => {
+                setIncomingLogoNonce((n) => n + 1);
+                setViewMode('cards');
+              }}
+              onOpenWizard={() => setWizardOpen(true)}
+              onSaveProject={() => handleSaveCurrentAsProject()}
+              activeProjectName={activeProject?.name ?? null}
+              autoSaveState={autoSaveState}
+            />
+          </div>
+
+          <div
+            className={`${
+              mobileEditorPanel === 'inspector' ? 'block' : 'hidden'
+            } lg:flex order-3 lg:order-3 min-w-0`}
+          >
+            <EditorInspector
+              doc={activeDoc}
+              activePalette={activePalette}
+              selectedLayers={selectedLayers}
+              onUpdateLayer={handleUpdateLayer}
+              onAlignSelectedLayers={handleAlignSelectedLayers}
+              onBatchUpdateSelected={handleBatchUpdateSelected}
+              onApplyFontPairing={handleApplyFontPairing}
+              onDuplicateSelected={handleDuplicateSelected}
+              onDeleteSelected={handleDeleteSelected}
+              onUpdateDocBackground={(backgroundColor, transparentBackground) =>
+                commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
+              }
+              onReorderLayer={handleReorderLayer}
+              onConvertTextToPath={handleConvertTextToPath}
+            />
+          </div>
         </main>
       )}
 
@@ -800,6 +1123,27 @@ export default function App() {
             onRegenerate={handleRegenerateConcepts}
             onOpenWizard={() => setWizardOpen(true)}
             onOpenInEditor={handleOpenConceptInEditor}
+          />
+        </main>
+      )}
+
+      {viewMode === 'projects' && (
+        <main className="flex-1">
+          <ProjectsDashboard
+            projects={projects}
+            activeProjectId={activeProjectId}
+            activeDoc={activeDoc}
+            activePalette={activePalette}
+            brief={brief}
+            autoSaveState={autoSaveState}
+            onSaveCurrentAsProject={handleSaveCurrentAsProject}
+            onNewBlankProject={handleNewBlankProject}
+            onOpenWizard={() => setWizardOpen(true)}
+            onOpenProject={handleOpenProject}
+            onRenameProject={handleRenameProject}
+            onDuplicateProject={handleDuplicateProject}
+            onDeleteProject={handleDeleteProject}
+            onExportProject={handleExportProject}
           />
         </main>
       )}

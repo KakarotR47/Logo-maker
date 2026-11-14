@@ -109,14 +109,14 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
     >
       <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#DCD9D0] bg-[#FAF9F6] shadow-2xl">
         {/* Top Modal Header */}
-        <div className="flex items-center justify-between gap-4 border-b border-[#E6E3DA] bg-white px-6 py-4">
+        <div className="flex items-center justify-between gap-4 border-b border-[#E6E3DA] bg-white px-4 sm:px-6 py-3.5 sm:py-4">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1B4332]">
               Auto-Layout Logo Wizard · Step {step} of 4
             </p>
             <h2
               id="logo-wizard-title"
-              className="font-display text-lg font-bold text-[#141413]"
+              className="font-display text-base sm:text-lg font-bold text-[#141413]"
             >
               {WIZARD_STEPS[step - 1]?.title}
             </h2>
@@ -141,7 +141,7 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
                 key={s.id}
                 type="button"
                 onClick={() => setStep(s.id)}
-                className={`flex items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                className={`flex items-center justify-center gap-1 border-b-2 px-1.5 sm:px-3 py-2.5 text-[10px] sm:text-[11px] font-semibold transition-colors cursor-pointer min-w-0 ${
                   active
                     ? 'border-[#141413] bg-white text-[#141413]'
                     : done
@@ -149,7 +149,7 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
                       : 'border-transparent text-[#6B675E] hover:bg-white/60'
                 }`}
               >
-                <span className="font-mono-num">{s.id}.</span>
+                <span className="font-mono-num shrink-0">{s.id}.</span>
                 <span className="truncate">{s.title}</span>
               </button>
             );
@@ -157,7 +157,7 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
         </div>
 
         {/* Step Body */}
-        <div className="p-6 min-h-[340px] max-h-[65vh] overflow-y-auto space-y-5">
+        <div className="p-4 sm:p-6 min-h-[300px] sm:min-h-[340px] max-h-[65vh] overflow-y-auto space-y-5">
           {/* STEP 1: BRAND NAME, SLOGAN, INDUSTRY */}
           {step === 1 && (
             <div className="space-y-4">
@@ -306,7 +306,7 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
                 <p className="text-xs font-semibold text-[#141413]">
                   Choose Brand Color Palette
                 </p>
-                <div className="mt-2.5 grid grid-cols-2 gap-2.5">
+                <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {COLOR_PALETTES.map((pal) => {
                     const active = brief.paletteId === pal.id;
                     return (
@@ -351,7 +351,7 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
                 <p className="text-xs font-semibold text-[#141413]">
                   Recommended Font Pairing
                 </p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {FONT_PAIRINGS.slice(0, 6).map((pair) => {
                     const active =
                       brief.primaryFontId === pair.primaryFontId &&
@@ -466,7 +466,7 @@ export const LogoWizardModal: React.FC<LogoWizardModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between gap-4 border-t border-[#E6E3DA] bg-white px-6 py-4">
+        <div className="flex items-center justify-between gap-3 border-t border-[#E6E3DA] bg-white px-4 sm:px-6 py-3.5 sm:py-4">
           <button
             type="button"
             onClick={() => (step > 1 ? setStep(step - 1) : onClose())}

@@ -249,4 +249,19 @@ export interface SavedBrandKit {
   wordmarkDocument: LogoDocument;
 }
 
-export type StudioViewMode = 'concepts' | 'editor' | 'mockups' | 'brandkit' | 'cards';
+export interface LogoProject {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  brief: BrandBrief;
+  document: LogoDocument;
+}
+
+export type StudioViewMode =
+  | 'concepts'
+  | 'editor'
+  | 'mockups'
+  | 'brandkit'
+  | 'projects'
+  | 'cards';
