@@ -1,0 +1,6 @@
+{
+  "name": "SA Brothers Stamp Vendor — Visiting Card Studio",
+  "description": "Premium digital and print-ready visiting card for SA Brothers Stamp Vendor, dealing in Stamp Duties, Stationery & Office Items in SITE Market, Karachi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
