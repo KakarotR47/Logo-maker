@@ -1364,6 +1364,7 @@ export const EditorInspector: React.FC<EditorInspectorProps> = ({
                           <path
                             d={p.d}
                             fill={isStrokePart ? 'none' : activePartColor}
+                            fillRule={p.fillRule}
                             stroke={
                               isStrokePart
                                 ? activePartColor

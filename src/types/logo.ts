@@ -198,6 +198,7 @@ export interface PathLayer extends LayerBase {
 export interface CustomSvgPart {
   d: string;
   fill?: string;
+  fillRule?: 'nonzero' | 'evenodd';
   stroke?: string;
   strokeWidth?: number;
   label?: string;

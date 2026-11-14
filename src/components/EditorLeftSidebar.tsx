@@ -11,6 +11,7 @@ import {
   Palette,
   Search,
   Shapes,
+  Sparkles,
   Trash2,
   Type,
   Unlock,
@@ -46,8 +47,9 @@ import {
   searchIconifyIcons,
 } from '../utils/iconifyApi';
 import { buildShapePath } from './CanvasLayerRenderer';
+import { AiMagicPanel, TracedSymbolPayload } from './AiMagicPanel';
 
-type SidebarToolTab = 'elements' | 'typography' | 'layouts' | 'palette' | 'layers';
+type SidebarToolTab = 'elements' | 'ai' | 'typography' | 'layouts' | 'palette' | 'layers';
 
 interface EditorLeftSidebarProps {
   doc: LogoDocument;
@@ -59,6 +61,7 @@ interface EditorLeftSidebarProps {
   onAddShape: (kind: ShapeKind) => void;
   onAddDivider: (kind: DividerKind) => void;
   onUploadCustomSvg: (svgText: string, fileName: string) => void;
+  onInsertTracedSymbol: (payload: TracedSymbolPayload) => void;
   onAddText: (preset: 'heading' | 'tagline' | 'curved') => void;
   onApplyFontPairing: (pairing: FontPairing) => void;
   onApplyFontToSelectedOrPrimary: (font: FontOption) => void;
@@ -82,6 +85,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   onAddShape,
   onAddDivider,
   onUploadCustomSvg,
+  onInsertTracedSymbol,
   onAddText,
   onApplyFontPairing,
   onApplyFontToSelectedOrPrimary,
@@ -212,6 +216,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
         {(
           [
             { id: 'elements', label: 'Vectors', icon: Shapes },
+            { id: 'ai', label: 'AI Magic', icon: Sparkles },
             { id: 'typography', label: 'Type', icon: Type },
             { id: 'layouts', label: 'Layouts', icon: LayoutGrid },
             { id: 'palette', label: 'Colors', icon: Palette },
@@ -239,6 +244,15 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
 
       {/* Active Tool Drawer */}
       <div className="flex-1 overflow-y-auto p-3.5 max-h-[380px] sm:max-h-[440px] lg:max-h-[calc(100vh-110px)]">
+        {/* TAB 0: AI MAGIC SYMBOL & VECTOR TRACE */}
+        {activeTab === 'ai' && (
+          <AiMagicPanel
+            variant="sidebar"
+            activePalette={activePalette}
+            onInsertTracedSymbol={onInsertTracedSymbol}
+          />
+        )}
+
         {/* TAB 1: VECTORS, SHAPES, DIVIDERS, CUSTOM SVG UPLOAD */}
         {activeTab === 'elements' && (
           <div className="space-y-5">

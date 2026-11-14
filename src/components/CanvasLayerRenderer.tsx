@@ -546,6 +546,7 @@ function renderCustomSvg(layer: CustomSvgLayer, fillAttr: string) {
             key={idx}
             d={p.d}
             fill={fill}
+            fillRule={p.fillRule}
             stroke={stroke}
             strokeWidth={sw}
             strokeLinecap="round"

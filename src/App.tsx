@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Download } from 'lucide-react';
 import { BrandBriefGrid } from './components/BrandBriefGrid';
 import { BrandKitView } from './components/BrandKitView';
+import { TracedSymbolPayload } from './components/AiMagicPanel';
 import { EditorInspector } from './components/EditorInspector';
 import { EditorLeftSidebar } from './components/EditorLeftSidebar';
 import { ExportModal } from './components/ExportModal';
@@ -17,6 +18,7 @@ import {
 import {
   BrandBrief,
   ColorPalette,
+  CustomSvgLayer,
   DividerKind,
   FontOption,
   FontPairing,
@@ -436,6 +438,80 @@ export default function App() {
     });
     commitDocument({ ...activeDoc, layers: [...activeDoc.layers, layer] });
     setSelectedLayerIds([layer.id]);
+  };
+
+  const handleInsertTracedSymbol = (payload: TracedSymbolPayload) => {
+    const size = 160;
+    const layer: CustomSvgLayer = {
+      id: nextLayerId('aisvg'),
+      name: payload.name,
+      type: 'custom-svg',
+      x: Math.round(activeDoc.width / 2 - size / 2),
+      y: Math.round(activeDoc.height / 2 - size / 2),
+      width: size,
+      height: size,
+      rotation: 0,
+      opacity: 1,
+      visible: true,
+      locked: false,
+      fill: activePalette.primary,
+      stroke: 'none',
+      strokeWidth: 0,
+      shadow: {
+        enabled: false,
+        color: 'rgba(17, 24, 39, 0.18)',
+        blur: 10,
+        offsetX: 0,
+        offsetY: 6,
+      },
+      paths: payload.paths,
+      viewBox: payload.viewBox,
+      preserveOriginalColors: payload.preserveOriginalColors,
+    };
+    commitDocument({ ...activeDoc, layers: [...activeDoc.layers, layer] });
+    setSelectedLayerIds([layer.id]);
+    setViewMode('editor');
+  };
+
+  const handleWizardGenerateWithAiSymbol = (payload: TracedSymbolPayload) => {
+    const baseConcepts = generateTwelveLogoConcepts(brief);
+    const enriched = baseConcepts.map((concept) => {
+      const hasIcon = concept.document.layers.some((l) => l.type === 'icon');
+      if (!hasIcon) return concept;
+      return {
+        ...concept,
+        document: {
+          ...concept.document,
+          layers: concept.document.layers.map((layer) => {
+            if (layer.type !== 'icon') return layer;
+            const replaced: CustomSvgLayer = {
+              id: nextLayerId('aisvg'),
+              name: payload.name,
+              type: 'custom-svg',
+              x: layer.x,
+              y: layer.y,
+              width: layer.width,
+              height: layer.height,
+              rotation: layer.rotation,
+              opacity: layer.opacity,
+              visible: layer.visible,
+              locked: false,
+              fill: layer.fill,
+              fillGradient: layer.fillGradient,
+              stroke: layer.stroke,
+              strokeWidth: layer.strokeWidth,
+              shadow: layer.shadow,
+              paths: payload.paths,
+              viewBox: payload.viewBox,
+              preserveOriginalColors: payload.preserveOriginalColors,
+            };
+            return replaced;
+          }),
+        },
+      };
+    });
+    setConcepts(enriched);
+    setViewMode('concepts');
   };
 
   const handleAddText = (preset: 'heading' | 'tagline' | 'curved') => {
@@ -1044,6 +1120,7 @@ export default function App() {
               onAddShape={handleAddShape}
               onAddDivider={handleAddDivider}
               onUploadCustomSvg={handleUploadCustomSvg}
+              onInsertTracedSymbol={handleInsertTracedSymbol}
               onAddText={handleAddText}
               onApplyFontPairing={handleApplyFontPairing}
               onApplyFontToSelectedOrPrimary={handleApplyFontToSelectedOrPrimary}
@@ -1193,7 +1270,10 @@ export default function App() {
         onClose={() => setWizardOpen(false)}
         brief={brief}
         setBrief={setBrief}
+        activePalette={activePalette}
         onGenerate={handleWizardGenerate}
+        onInsertTracedSymbol={handleInsertTracedSymbol}
+        onGenerateWithAiSymbol={handleWizardGenerateWithAiSymbol}
       />
 
       <ExportModal
