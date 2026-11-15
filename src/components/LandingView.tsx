@@ -122,6 +122,7 @@ interface LandingViewProps {
   onOpenBlankEditor: () => void;
   onOpenSampleInEditor: (brief: BrandBrief, doc: LogoDocument) => void;
   onOpenProjects: () => void;
+  onOpenUpdateLog?: () => void;
 }
 
 export const LandingView: React.FC<LandingViewProps> = ({
@@ -131,6 +132,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
   onOpenBlankEditor,
   onOpenSampleInEditor,
   onOpenProjects,
+  onOpenUpdateLog,
 }) => {
   const [brandInput, setBrandInput] = useState<string>(initialBrandName || '');
   const [selectedIndustry, setSelectedIndustry] = useState<IndustryCategory>('Tech & AI');
@@ -325,6 +327,18 @@ export const LandingView: React.FC<LandingViewProps> = ({
                       >
                         <FolderOpen className="h-3.5 w-3.5" />
                         Resume saved projects ({savedProjectsCount})
+                      </button>
+                    </>
+                  )}
+                  {onOpenUpdateLog && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <button
+                        type="button"
+                        onClick={onOpenUpdateLog}
+                        className="font-medium text-[#5C5951] hover:text-[#141413] hover:underline underline-offset-4 cursor-pointer"
+                      >
+                        Build Update Log
                       </button>
                     </>
                   )}
@@ -621,6 +635,15 @@ export const LandingView: React.FC<LandingViewProps> = ({
             >
               Canvas Editor
             </button>
+            {onOpenUpdateLog && (
+              <button
+                type="button"
+                onClick={onOpenUpdateLog}
+                className="hover:text-[#141413] cursor-pointer"
+              >
+                Update Log
+              </button>
+            )}
           </div>
           <span>Vector Logo &amp; Brand Identity Studio</span>
         </div>

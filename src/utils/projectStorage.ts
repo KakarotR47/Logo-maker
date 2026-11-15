@@ -101,13 +101,22 @@ export function cloneDocumentForProject(
   nextTitle?: string
 ): LogoDocument {
   const cloned = JSON.parse(JSON.stringify(doc)) as LogoDocument;
+  const groupIdMap = new Map<string, string>();
+  const remappedGroups = cloned.groups?.map((g) => {
+    const freshId = nextLayerId('grp');
+    groupIdMap.set(g.id, freshId);
+    return { ...g, id: freshId };
+  });
+
   return {
     ...cloned,
     id: nextLayerId('doc'),
     title: nextTitle ?? cloned.title,
+    groups: remappedGroups,
     layers: cloned.layers.map((layer) => ({
       ...layer,
       id: nextLayerId(layer.type),
+      groupId: layer.groupId ? (groupIdMap.get(layer.groupId) ?? layer.groupId) : undefined,
     })),
   };
 }

@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Crown,
   Eye,
   EyeOff,
   FileCode2,
@@ -41,6 +42,7 @@ import {
   LogoLayer,
   LogoStylePreset,
   ShapeKind,
+  TextLayer,
 } from '../types/logo';
 import { batchLoadGoogleFonts, ensureFontOptionLoaded } from '../utils/googleFonts';
 import {
@@ -50,13 +52,24 @@ import {
   getIconifyPreviewUrl,
   searchIconifyIcons,
 } from '../utils/iconifyApi';
-import { buildShapePath } from './CanvasLayerRenderer';
+import { buildShapePath, LogoDocumentSvg } from './CanvasLayerRenderer';
+import {
+  buildDocumentFromTemplate,
+  filterProTemplates,
+  PRO_TEMPLATE_CATEGORIES,
+  PRO_TEMPLATE_SPECS,
+  ProTemplateCategory,
+  ProTemplateSpec,
+} from '../utils/templateLibrary';
 import { AiMagicPanel, TracedSymbolPayload } from './AiMagicPanel';
+import { MonogramPanel } from './MonogramPanel';
+import { TextEffectsStudio } from './TextEffectsStudio';
 
 export type SidebarToolTab =
   | 'templates'
   | 'elements'
   | 'text'
+  | 'monogram'
   | 'brand'
   | 'ai'
   | 'uploads'
@@ -71,6 +84,7 @@ export interface UploadedSvgEntry {
 
 interface EditorLeftSidebarProps {
   doc: LogoDocument;
+  brandName: string;
   activePalette: ColorPalette;
   activeStyle: LogoStylePreset;
   selectedLayerIds: string[];
@@ -82,11 +96,16 @@ interface EditorLeftSidebarProps {
   onUploadCustomSvg: (svgText: string, fileName: string, recordUpload?: boolean) => void;
   onInsertTracedSymbol: (payload: TracedSymbolPayload) => void;
   onAddText: (preset: 'heading' | 'tagline' | 'curved') => void;
+  onUpdateLayer: (updated: LogoLayer) => void;
+  onInsertMonogram: (layers: LogoLayer[], mode: 'add' | 'replace') => void;
+  onConvertTextToPath: (layer: TextLayer) => Promise<void>;
   onApplyFontPairing: (pairing: FontPairing) => void;
   onApplyFontToSelectedOrPrimary: (font: FontOption) => void;
   onApplyPalette: (palette: ColorPalette) => void;
   onMagicRecolor?: () => void;
   onOpenVariations?: () => void;
+  onSelectProTemplate?: (spec: ProTemplateSpec, applyCustomBrand: boolean) => void;
+  onOpenTemplateGallery?: () => void;
   onSwitchLayout: (archetype: LayoutArchetype) => void;
   onSwitchStyle: (style: LogoStylePreset) => void;
   onToggleLayerVisible: (id: string) => void;
@@ -102,16 +121,18 @@ const RAIL_ITEMS: Array<{
   icon: React.FC<{ className?: string }>;
 }> = [
   { id: 'templates', label: 'Templates', icon: LayoutGrid },
+  { id: 'ai', label: 'AI Magic', icon: Sparkles },
   { id: 'elements', label: 'Elements', icon: Shapes },
   { id: 'text', label: 'Text', icon: Type },
-  { id: 'brand', label: 'Brand', icon: Palette },
-  { id: 'ai', label: 'AI Magic', icon: Sparkles },
+  { id: 'monogram', label: 'Monogram', icon: Crown },
+  { id: 'brand', label: 'Brand Kit', icon: Palette },
   { id: 'uploads', label: 'Uploads', icon: Upload },
   { id: 'layers', label: 'Layers', icon: Layers },
 ];
 
 export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   doc,
+  brandName,
   activePalette,
   activeStyle,
   selectedLayerIds,
@@ -123,11 +144,16 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   onUploadCustomSvg,
   onInsertTracedSymbol,
   onAddText,
+  onUpdateLayer,
+  onInsertMonogram,
+  onConvertTextToPath,
   onApplyFontPairing,
   onApplyFontToSelectedOrPrimary,
   onApplyPalette,
   onMagicRecolor,
   onOpenVariations,
+  onSelectProTemplate,
+  onOpenTemplateGallery,
   onSwitchLayout,
   onSwitchStyle,
   onToggleLayerVisible,
@@ -139,6 +165,8 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   const [activeTab, setActiveTab] = useState<SidebarToolTab>('elements');
   const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
   const [templateQuery, setTemplateQuery] = useState<string>('');
+  const [templateCategory, setTemplateCategory] = useState<ProTemplateCategory | 'All'>('All');
+  const [applyBrandToTemplate, setApplyBrandToTemplate] = useState<boolean>(false);
   const [iconSource, setIconSource] = useState<'studio' | 'iconify'>('studio');
   const [iconQuery, setIconQuery] = useState<string>('');
   const [iconCategory, setIconCategory] = useState<string>('All');
@@ -149,14 +177,24 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   const [iconifyError, setIconifyError] = useState<string | null>(null);
   const [addingIconifyId, setAddingIconifyId] = useState<string | null>(null);
   const [fontQuery, setFontQuery] = useState<string>('');
+  const [textSubTab, setTextSubTab] = useState<'fonts' | 'effects'>('fonts');
+  const [convertingTextPath, setConvertingTextPath] = useState<boolean>(false);
   const [paletteQuery, setPaletteQuery] = useState<string>('');
   const [uploadQuery, setUploadQuery] = useState<string>('');
   const [layerQuery, setLayerQuery] = useState<string>('');
   const [isDragOverUpload, setIsDragOverUpload] = useState<boolean>(false);
   const svgUploadRef = useRef<HTMLInputElement>(null);
 
+  const targetTextLayer = useMemo(() => {
+    const selectedText = doc.layers.find(
+      (l): l is TextLayer => l.type === 'text' && selectedLayerIds.includes(l.id)
+    );
+    if (selectedText) return selectedText;
+    return doc.layers.find((l): l is TextLayer => l.type === 'text') ?? null;
+  }, [doc.layers, selectedLayerIds]);
+
   React.useEffect(() => {
-    if (activeTab === 'text') {
+    if (activeTab === 'text' || activeTab === 'templates') {
       batchLoadGoogleFonts(FONT_OPTIONS);
     }
   }, [activeTab]);
@@ -235,6 +273,11 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
     readSvgFile(file);
   };
 
+  const filteredProTemplates = useMemo(
+    () => filterProTemplates(templateQuery, templateCategory),
+    [templateQuery, templateCategory]
+  );
+
   const filteredLayouts = useMemo(() => {
     const q = templateQuery.trim().toLowerCase();
     if (!q) return LAYOUT_ARCHETYPES;
@@ -295,10 +338,10 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
 
   return (
     <aside className="flex flex-col lg:flex-row shrink-0 select-none">
-      {/* Sleek 64px Dark/Slate Left Icon Rail */}
+      {/* Zone 2A: 68px Icon Navigation Rail */}
       <nav
         aria-label="Studio tools"
-        className="flex flex-row lg:flex-col items-center gap-1 bg-[#0F172A] dark:bg-[#11131D] border-b lg:border-b-0 lg:border-r border-[#1E293B] dark:border-[#2A2D3D] px-1.5 py-1.5 lg:py-3 lg:w-16 shrink-0 overflow-x-auto"
+        className="flex flex-row lg:flex-col items-center gap-1 bg-white dark:bg-[#181B23] border-b lg:border-b-0 lg:border-r border-[#E2E8F0] dark:border-[#2A2F3D] px-1.5 py-1.5 lg:py-2.5 lg:w-[68px] shrink-0 overflow-x-auto"
       >
         {RAIL_ITEMS.map(({ id, label, icon: Icon }) => {
           const isActive = activeTab === id && drawerOpen;
@@ -307,19 +350,27 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
               key={id}
               type="button"
               onClick={() => handleRailClick(id)}
-              title={label}
-              className={`group flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 lg:py-2.5 flex-1 lg:flex-initial min-w-[60px] lg:w-12 text-[10px] font-medium transition-all cursor-pointer ${
+              title={`${label}${isActive ? ' (click to collapse)' : ''}`}
+              className={`relative group flex flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 flex-1 lg:flex-initial min-w-[60px] lg:w-[54px] text-[10px] font-semibold transition-all active:scale-95 cursor-pointer ${
                 isActive
-                  ? 'bg-white/12 text-white shadow-sm ring-1 ring-white/15'
-                  : 'text-slate-400 hover:bg-white/6 hover:text-slate-100'
+                  ? 'bg-indigo-50 dark:bg-indigo-500/18 text-indigo-600 dark:text-indigo-300 shadow-xs ring-1 ring-indigo-500/30 dark:ring-indigo-400/30'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/6 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >
+              {isActive && (
+                <span
+                  aria-hidden="true"
+                  className="hidden lg:block absolute -left-1.5 top-2 bottom-2 w-[3px] rounded-r-full bg-[linear-gradient(135deg,#6366F1,#8B5CF6)]"
+                />
+              )}
               <Icon
                 className={`h-4 w-4 transition-transform ${
-                  isActive ? 'scale-105 text-emerald-400' : 'group-hover:scale-105'
+                  isActive
+                    ? 'scale-105 text-indigo-600 dark:text-indigo-300'
+                    : 'group-hover:scale-105'
                 }`}
               />
-              <span className="truncate leading-none">{label}</span>
+              <span className="truncate leading-none max-w-full">{label}</span>
             </button>
           );
         })}
@@ -330,24 +381,24 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             type="button"
             onClick={() => setDrawerOpen(true)}
             title="Expand tool drawer"
-            className="hidden lg:flex mt-auto h-9 w-9 items-center justify-center rounded-xl text-slate-400 hover:bg-white/10 hover:text-white cursor-pointer"
+            className="hidden lg:flex mt-auto h-9 w-9 items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white active:scale-95 transition-all cursor-pointer"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         )}
       </nav>
 
-      {/* Smooth 300px Collapsible Drawer */}
+      {/* Zone 2B: Smooth 320px Collapsible Drawer */}
       <div
-        className={`overflow-hidden bg-white dark:bg-[#161822] border-b lg:border-b-0 border-[#E2E8F0] dark:border-[#2A2D3D] transition-all duration-200 ease-out ${
+        className={`overflow-hidden bg-white dark:bg-[#181B23] border-b lg:border-b-0 border-[#E2E8F0] dark:border-[#2A2F3D] transition-all duration-200 ease-out ${
           drawerOpen
-            ? 'w-full lg:w-[300px] lg:border-r opacity-100'
+            ? 'w-full lg:w-[320px] lg:border-r opacity-100'
             : 'h-0 lg:h-auto lg:w-0 opacity-0 pointer-events-none border-none'
         }`}
       >
-        <div className="flex h-full w-full lg:w-[300px] flex-col max-h-[380px] sm:max-h-[430px] lg:max-h-[calc(100vh-57px)]">
+        <div className="flex h-full w-full lg:w-[320px] flex-col max-h-[380px] sm:max-h-[430px] lg:max-h-[calc(100vh-56px)]">
           {/* Drawer Header */}
-          <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#2A2D3D] px-3.5 py-2.5 shrink-0">
+          <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#2A2F3D] px-3.5 py-2.5 shrink-0">
             <span className="text-xs font-bold tracking-tight text-slate-900 dark:text-slate-100">
               {activeRailMeta.label}
             </span>
@@ -355,31 +406,128 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
               type="button"
               onClick={() => setDrawerOpen(false)}
               title="Collapse drawer"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#232734] hover:text-slate-900 dark:hover:text-white active:scale-95 transition-all cursor-pointer"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
           </div>
 
           {/* Drawer Body */}
-          <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+          <div className="flex-1 overflow-y-auto px-3.5 pb-4 pt-2.5 space-y-4">
             {/* ============================================================== */}
-            {/* 1. TEMPLATES TAB (Instant Layouts & Style Presets)             */}
+            {/* 1. TEMPLATES TAB (Pro Library + Lockup Layouts + Style Presets)*/}
             {/* ============================================================== */}
             {activeTab === 'templates' && (
               <div className="space-y-4">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={templateQuery}
-                    onChange={(e) => setTemplateQuery(e.target.value)}
-                    placeholder="Search layouts & logo styles..."
-                    className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                  />
+                <div className="sticky top-0 z-10 -mx-3.5 px-3.5 pt-0.5 pb-2 bg-white/95 dark:bg-[#181B23]/95 backdrop-blur-xs">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={templateQuery}
+                      onChange={(e) => setTemplateQuery(e.target.value)}
+                      placeholder={`Search ${PRO_TEMPLATE_SPECS.length} templates & styles...`}
+                      className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none transition-colors"
+                    />
+                  </div>
                 </div>
 
-                <div>
+                {/* Pro JSON-Driven Industry Templates */}
+                {onSelectProTemplate && (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                        Studio Templates ({filteredProTemplates.length})
+                      </h3>
+                      {onOpenTemplateGallery && (
+                        <button
+                          type="button"
+                          onClick={onOpenTemplateGallery}
+                          className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer whitespace-nowrap"
+                        >
+                          Full Gallery
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                      {(['All', ...PRO_TEMPLATE_CATEGORIES] as const).map((cat) => {
+                        const active = templateCategory === cat;
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setTemplateCategory(cat)}
+                            className={`rounded-lg border px-2 py-1 text-[10.5px] font-semibold transition-all active:scale-95 whitespace-nowrap shrink-0 cursor-pointer ${
+                              active
+                                ? 'border-indigo-500 bg-indigo-600 text-white'
+                                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#1E222D] text-slate-600 dark:text-slate-300 hover:border-indigo-400/60'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyBrandToTemplate}
+                        onChange={(e) => setApplyBrandToTemplate(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded accent-indigo-600"
+                      />
+                      <span className="truncate">
+                        Apply &ldquo;{brandName || 'My Brand'}&rdquo; name
+                      </span>
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {filteredProTemplates.slice(0, 14).map((spec) => {
+                        const previewDoc = buildDocumentFromTemplate(spec, {
+                          customBrandName: applyBrandToTemplate ? brandName : undefined,
+                          deterministicIdPrefix: `side-tpl-${spec.id}`,
+                        });
+                        return (
+                          <button
+                            key={spec.id}
+                            type="button"
+                            onClick={() => onSelectProTemplate(spec, applyBrandToTemplate)}
+                            className="studio-card-hover group flex flex-col overflow-hidden rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] text-left shadow-xs active:scale-95 cursor-pointer"
+                          >
+                            <div className="aspect-[4/3] w-full overflow-hidden border-b border-[#E2E8F0] dark:border-[#2A2F3D]">
+                              <LogoDocumentSvg
+                                doc={previewDoc}
+                                idPrefix={`sidetpl-${spec.id}`}
+                                className="h-full w-full block"
+                              />
+                            </div>
+                            <div className="px-2 py-1.5 w-full">
+                              <p className="truncate text-[11px] font-semibold text-slate-900 dark:text-slate-100">
+                                {spec.name}
+                              </p>
+                              <p className="truncate text-[9.5px] text-slate-500 dark:text-slate-400">
+                                {spec.category}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {onOpenTemplateGallery && (
+                      <button
+                        type="button"
+                        onClick={onOpenTemplateGallery}
+                        className="w-full rounded-lg border border-indigo-500/30 dark:border-indigo-400/35 bg-indigo-50/70 dark:bg-indigo-500/12 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/70 dark:hover:bg-indigo-500/20 active:scale-95 transition-all cursor-pointer"
+                      >
+                        Browse All {PRO_TEMPLATE_SPECS.length} Templates →
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                     Lockup Templates
                   </h3>
@@ -389,9 +537,9 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                         key={arch.id}
                         type="button"
                         onClick={() => onSwitchLayout(arch.id)}
-                        className="group flex flex-col items-start gap-2 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-2.5 text-left shadow-sm hover:border-emerald-600 dark:hover:border-emerald-500 transition-colors cursor-pointer"
+                        className="studio-card-hover group flex flex-col items-start gap-2 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] p-2.5 text-left shadow-xs active:scale-95 cursor-pointer"
                       >
-                        <div className="flex h-10 w-full items-center justify-center rounded-lg bg-slate-50 dark:bg-[#141620] px-2">
+                        <div className="flex h-10 w-full items-center justify-center rounded-lg bg-[#F1F3F6] dark:bg-[#141720] px-2">
                           {arch.id === 'icon-left' && (
                             <div className="flex items-center gap-2">
                               <span
@@ -459,7 +607,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   </div>
                 </div>
 
-                <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-3.5">
+                <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                     Style Presets
                   </h3>
@@ -471,16 +619,16 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           key={st.id}
                           type="button"
                           onClick={() => onSwitchStyle(st.id)}
-                          className={`flex w-full flex-col rounded-xl border p-2.5 text-left shadow-sm transition-colors cursor-pointer ${
+                          className={`flex w-full flex-col rounded-xl border p-2.5 text-left shadow-xs transition-all active:scale-95 cursor-pointer ${
                             active
-                              ? 'border-[#1B4332] bg-gradient-to-r from-[#1B4332] to-[#2D6A4F] text-white'
-                              : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-900 dark:text-slate-100 hover:border-slate-400 dark:hover:border-slate-500'
+                              ? 'border-indigo-500 bg-[linear-gradient(135deg,#6366F1,#8B5CF6)] text-white shadow-[0_4px_12px_rgba(99,102,241,0.28)]'
+                              : 'studio-card-hover border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] text-slate-900 dark:text-slate-100'
                           }`}
                         >
                           <span className="text-xs font-semibold">{st.label}</span>
                           <span
                             className={`text-[10.5px] ${
-                              active ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'
+                              active ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'
                             }`}
                           >
                             {st.note}
@@ -498,33 +646,33 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             {/* ============================================================== */}
             {activeTab === 'elements' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-100 dark:bg-[#1E202B] p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setIconSource('studio')}
-                    className={`rounded-lg py-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                      iconSource === 'studio'
-                        ? 'bg-white dark:bg-[#2A2D3D] text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    Studio Marks
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIconSource('iconify')}
-                    className={`rounded-lg py-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                      iconSource === 'iconify'
-                        ? 'bg-white dark:bg-[#2A2D3D] text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    Lucide &amp; Iconify
-                  </button>
-                </div>
+                <div className="sticky top-0 z-10 -mx-3.5 px-3.5 pt-0.5 pb-2.5 bg-white/95 dark:bg-[#181B23]/95 backdrop-blur-xs space-y-2">
+                  <div className="grid grid-cols-2 gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6] dark:bg-[#0F1117] p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setIconSource('studio')}
+                      className={`rounded-md py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+                        iconSource === 'studio'
+                          ? 'bg-white dark:bg-[#1E222D] text-indigo-600 dark:text-indigo-300 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      Studio Marks
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIconSource('iconify')}
+                      className={`rounded-md py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+                        iconSource === 'iconify'
+                          ? 'bg-white dark:bg-[#1E222D] text-indigo-600 dark:text-indigo-300 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      Lucide &amp; Iconify
+                    </button>
+                  </div>
 
-                {iconSource === 'studio' ? (
-                  <>
+                  {iconSource === 'studio' ? (
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
                       <input
@@ -532,15 +680,30 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                         value={iconQuery}
                         onChange={(e) => setIconQuery(e.target.value)}
                         placeholder="Search leaf, circuit, crown, shield..."
-                        className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
+                        className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none"
                       />
                     </div>
+                  ) : (
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        value={iconifyQuery}
+                        onChange={(e) => setIconifyQuery(e.target.value)}
+                        placeholder="Search 200k+ icons (crown, lion, leaf)..."
+                        className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
 
+                {iconSource === 'studio' ? (
+                  <>
                     <select
                       value={iconCategory}
                       onChange={(e) => setIconCategory(e.target.value)}
                       aria-label="Filter icon category"
-                      className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-1.5 text-xs font-medium text-slate-900 dark:text-slate-100 focus:border-emerald-600 focus:outline-none"
+                      className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] px-2.5 py-1.5 text-xs font-medium text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none"
                     >
                       <option value="All">All Vector Categories ({VECTOR_ICONS.length})</option>
                       <option value="Nature & Eco">Nature &amp; Eco</option>
@@ -558,7 +721,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           type="button"
                           onClick={() => onAddIcon(icon.id)}
                           title={`Add ${icon.name}`}
-                          className="group flex flex-col items-center gap-1.5 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-2.5 text-center shadow-sm hover:border-emerald-600 dark:hover:border-emerald-500 transition-colors cursor-pointer"
+                          className="studio-card-hover group flex flex-col items-center gap-1.5 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] p-2.5 text-center shadow-xs active:scale-95 cursor-pointer"
                         >
                           <svg viewBox="0 0 100 100" className="h-8 w-8">
                             {icon.paths.map((p, idx) => {
@@ -594,22 +757,11 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   </>
                 ) : (
                   <>
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                      <input
-                        type="text"
-                        value={iconifyQuery}
-                        onChange={(e) => setIconifyQuery(e.target.value)}
-                        placeholder="Search 200k+ icons (crown, lion, leaf)..."
-                        className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                      />
-                    </div>
-
                     <select
                       value={iconifyCollection}
                       onChange={(e) => setIconifyCollection(e.target.value)}
                       aria-label="Filter Iconify collection"
-                      className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-1.5 text-xs font-medium text-slate-900 dark:text-slate-100"
+                      className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] px-2.5 py-1.5 text-xs font-medium text-slate-900 dark:text-slate-100"
                     >
                       {ICONIFY_COLLECTIONS.map((col) => (
                         <option key={col.id} value={col.id}>
@@ -624,10 +776,10 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           key={term}
                           type="button"
                           onClick={() => setIconifyQuery(term)}
-                          className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium capitalize cursor-pointer ${
+                          className={`rounded-lg border px-2.5 py-0.5 text-[10px] font-semibold capitalize active:scale-95 transition-all cursor-pointer ${
                             iconifyQuery.toLowerCase() === term
-                              ? 'border-[#1B4332] bg-[#1B4332] text-white'
-                              : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+                              ? 'border-indigo-500 bg-indigo-600 text-white'
+                              : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] text-slate-600 dark:text-slate-300'
                           }`}
                         >
                           {term}
@@ -646,7 +798,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                         {Array.from({ length: 6 }).map((_, idx) => (
                           <div
                             key={idx}
-                            className="h-16 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-100 dark:bg-[#1E202B] animate-pulse"
+                            className="h-16 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-100 dark:bg-[#1E222D] animate-pulse"
                           />
                         ))}
                       </div>
@@ -661,7 +813,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                               disabled={Boolean(addingIconifyId)}
                               onClick={() => void handlePickIconifyIcon(item)}
                               title={`Insert ${item.id} as editable vector paths`}
-                              className="group flex flex-col items-center gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-2.5 text-center shadow-sm hover:border-emerald-600 transition-colors cursor-pointer"
+                              className="studio-card-hover group flex flex-col items-center gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] p-2.5 text-center shadow-xs active:scale-95 cursor-pointer"
                             >
                               <img
                                 src={getIconifyPreviewUrl(
@@ -685,7 +837,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   </>
                 )}
 
-                <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-3.5">
+                <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                     Shapes &amp; Badges ({SHAPE_OPTIONS.length})
                   </h3>
@@ -698,7 +850,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           type="button"
                           onClick={() => onAddShape(s.kind)}
                           title={`Add ${s.label}`}
-                          className="flex flex-col items-center gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-1.5 py-2 text-[10px] font-medium text-slate-800 dark:text-slate-200 shadow-sm hover:border-emerald-600 cursor-pointer"
+                          className="studio-card-hover flex flex-col items-center gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] px-1.5 py-2 text-[10px] font-medium text-slate-800 dark:text-slate-200 shadow-xs active:scale-95 cursor-pointer"
                         >
                           <svg viewBox="0 0 40 40" className="h-6 w-6">
                             <path
@@ -725,7 +877,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   </div>
                 </div>
 
-                <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-3.5">
+                <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                     Dividers &amp; Rules
                   </h3>
@@ -735,7 +887,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                         key={d.kind}
                         type="button"
                         onClick={() => onAddDivider(d.kind)}
-                        className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2.5 py-2 text-[11px] font-medium text-slate-800 dark:text-slate-200 shadow-sm hover:border-emerald-600 cursor-pointer truncate"
+                        className="studio-card-hover rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] px-2.5 py-2 text-[11px] font-medium text-slate-800 dark:text-slate-200 shadow-xs active:scale-95 cursor-pointer truncate"
                       >
                         {d.label}
                       </button>
@@ -746,110 +898,198 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             )}
 
             {/* ============================================================== */}
-            {/* 3. TEXT TAB (Wordmarks, Curved Arc, Pairings, Google Fonts)    */}
+            {/* 3. TEXT TAB (Wordmarks, Effects & Warp Studio, Pairings, Fonts) */}
             {/* ============================================================== */}
             {activeTab === 'text' && (
-              <div className="space-y-4">
-                <div className="space-y-2">
+              <div className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6] dark:bg-[#0F1117] p-0.5">
                   <button
                     type="button"
-                    onClick={() => onAddText('heading')}
-                    className="w-full rounded-full bg-gradient-to-r from-[#1B4332] via-[#245942] to-[#2D6A4F] px-4 py-2.5 text-center text-xs font-semibold text-white shadow-sm hover:brightness-110 transition-all cursor-pointer"
+                    onClick={() => setTextSubTab('fonts')}
+                    className={`rounded-md py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+                      textSubTab === 'fonts'
+                        ? 'bg-white dark:bg-[#1E222D] text-indigo-600 dark:text-indigo-300 shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
                   >
-                    + Add Brand Wordmark
+                    Add &amp; Fonts
                   </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onAddText('tagline')}
-                      className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 shadow-sm hover:border-emerald-600 cursor-pointer"
-                    >
-                      + Tagline
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onAddText('curved')}
-                      className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 shadow-sm hover:border-emerald-600 cursor-pointer"
-                    >
-                      + Curved Arc
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTextSubTab('effects')}
+                    className={`rounded-md py-1.5 text-[11px] font-semibold transition-all cursor-pointer ${
+                      textSubTab === 'effects'
+                        ? 'bg-white dark:bg-[#1E222D] text-indigo-600 dark:text-indigo-300 shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Effects &amp; Warp
+                  </button>
                 </div>
 
-                <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-3.5">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                    Font Pairings
-                  </h3>
-                  <div className="mt-2 space-y-2">
-                    {FONT_PAIRINGS.map((pair) => (
-                      <button
-                        key={pair.id}
-                        type="button"
-                        onClick={() => {
-                          const pf = FONT_OPTIONS.find((f) => f.id === pair.primaryFontId);
-                          const sf = FONT_OPTIONS.find((f) => f.id === pair.secondaryFontId);
-                          if (pf) void ensureFontOptionLoaded(pf);
-                          if (sf) void ensureFontOptionLoaded(sf);
-                          onApplyFontPairing(pair);
+                {textSubTab === 'effects' ? (
+                  targetTextLayer ? (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#1E222D] px-2.5 py-1.5">
+                        <span className="text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+                          Target Layer
+                        </span>
+                        <span className="max-w-[160px] truncate text-[11px] font-semibold text-slate-900 dark:text-slate-100">
+                          {targetTextLayer.text}
+                        </span>
+                      </div>
+                      <TextEffectsStudio
+                        compact
+                        layer={targetTextLayer}
+                        activePalette={activePalette}
+                        onChange={(patch) =>
+                          onUpdateLayer({ ...targetTextLayer, ...patch })
+                        }
+                        onConvertTextToPath={async () => {
+                          setConvertingTextPath(true);
+                          try {
+                            await onConvertTextToPath(targetTextLayer);
+                          } finally {
+                            setConvertingTextPath(false);
+                          }
                         }}
-                        className="flex w-full flex-col rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-2.5 text-left shadow-sm hover:border-emerald-600 cursor-pointer"
+                        convertingPath={convertingTextPath}
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-[#CBD5E1] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#1E222D] p-4 text-center space-y-2.5">
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        No text layer on canvas yet
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Add a wordmark or curved arc first to apply Glow, Extrude, Foil, Wave &amp; Slant effects.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onAddText('heading')}
+                        className="studio-gradient-btn w-full rounded-lg px-3.5 py-2 text-xs font-semibold cursor-pointer"
                       >
-                        <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                          {pair.name}
-                        </span>
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {pair.note}
-                        </span>
+                        + Add Brand Wordmark
                       </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-3.5">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                    Google Fonts ({FONT_OPTIONS.length})
-                  </h3>
-                  <div className="relative mt-2">
-                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={fontQuery}
-                      onChange={(e) => setFontQuery(e.target.value)}
-                      placeholder="Search Outfit, Sora, Cinzel..."
-                      className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                    />
-                  </div>
-                  <div className="mt-2 space-y-1.5">
-                    {filteredFonts.map((f) => (
+                    </div>
+                  )
+                ) : (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
                       <button
-                        key={f.id}
                         type="button"
-                        onClick={() => {
-                          void ensureFontOptionLoaded(f);
-                          onApplyFontToSelectedOrPrimary(f);
-                        }}
-                        className="flex w-full items-center justify-between rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-3 py-2 text-left shadow-sm hover:border-emerald-600 cursor-pointer"
+                        onClick={() => onAddText('heading')}
+                        className="studio-gradient-btn w-full rounded-lg px-4 py-2.5 text-center text-xs font-semibold cursor-pointer"
                       >
-                        <span
-                          className="text-sm font-semibold text-slate-900 dark:text-slate-100"
-                          style={{ fontFamily: f.cssFamily }}
+                        + Add Brand Wordmark
+                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onAddText('tagline')}
+                          className="studio-card-hover rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] px-2.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 shadow-xs active:scale-95 cursor-pointer"
                         >
-                          {f.name}
-                        </span>
-                        <span className="text-[10px] text-slate-400">{f.category}</span>
-                      </button>
-                    ))}
+                          + Tagline
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onAddText('curved')}
+                          className="studio-card-hover rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] px-2.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 shadow-xs active:scale-95 cursor-pointer"
+                        >
+                          + Curved Arc
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                        Font Pairings
+                      </h3>
+                      <div className="mt-2 space-y-2">
+                        {FONT_PAIRINGS.map((pair) => (
+                          <button
+                            key={pair.id}
+                            type="button"
+                            onClick={() => {
+                              const pf = FONT_OPTIONS.find((f) => f.id === pair.primaryFontId);
+                              const sf = FONT_OPTIONS.find((f) => f.id === pair.secondaryFontId);
+                              if (pf) void ensureFontOptionLoaded(pf);
+                              if (sf) void ensureFontOptionLoaded(sf);
+                              onApplyFontPairing(pair);
+                            }}
+                            className="studio-card-hover flex w-full flex-col rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] p-2.5 text-left shadow-xs active:scale-95 cursor-pointer"
+                          >
+                            <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                              {pair.name}
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              {pair.note}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                        Google Fonts ({FONT_OPTIONS.length})
+                      </h3>
+                      <div className="sticky top-0 z-10 -mx-3.5 px-3.5 pt-2 pb-2 bg-white/95 dark:bg-[#181B23]/95 backdrop-blur-xs">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                          <input
+                            type="text"
+                            value={fontQuery}
+                            onChange={(e) => setFontQuery(e.target.value)}
+                            placeholder="Search Outfit, Sora, Cinzel..."
+                            className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-1 space-y-1.5">
+                        {filteredFonts.map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => {
+                              void ensureFontOptionLoaded(f);
+                              onApplyFontToSelectedOrPrimary(f);
+                            }}
+                            className="studio-card-hover flex w-full items-center justify-between rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] px-3 py-2 text-left shadow-xs active:scale-95 cursor-pointer"
+                          >
+                            <span
+                              className="text-sm font-semibold text-slate-900 dark:text-slate-100"
+                              style={{ fontFamily: f.cssFamily }}
+                            >
+                              {f.name}
+                            </span>
+                            <span className="text-[10px] text-slate-400">{f.category}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
+            )}
+
+            {/* ============================================================== */}
+            {/* 3B. MONOGRAM TAB (24 Smart Interlocking, Crest, Wreath Makers) */}
+            {/* ============================================================== */}
+            {activeTab === 'monogram' && (
+              <MonogramPanel
+                brandName={brandName}
+                activePalette={activePalette}
+                onInsertMonogram={onInsertMonogram}
+              />
             )}
 
             {/* ============================================================== */}
             {/* 4. BRAND TAB (Triad, Magic Recolor, 4 Variations, Palettes)    */}
             {/* ============================================================== */}
             {activeTab === 'brand' && (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] p-3 space-y-2.5 shadow-sm">
+              <div className="space-y-3.5">
+                <div className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#1E222D] p-3 space-y-2.5 shadow-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
                       {activePalette.name}
@@ -871,7 +1111,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                     <button
                       type="button"
                       onClick={onMagicRecolor}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#1B4332] via-[#245942] to-[#2D6A4F] px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:brightness-110 transition-all cursor-pointer"
+                      className="studio-gradient-btn inline-flex w-full items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold cursor-pointer"
                     >
                       <Shuffle className="h-3.5 w-3.5" />
                       1-Click Magic Recolor
@@ -881,23 +1121,25 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                     <button
                       type="button"
                       onClick={onOpenVariations}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822] px-3 py-2 text-xs font-semibold text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-[#252836] transition-colors cursor-pointer"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-3 py-2 text-xs font-semibold text-slate-900 dark:text-slate-100 hover:border-indigo-400/60 active:scale-95 transition-all cursor-pointer"
                     >
-                      <Layers className="h-3.5 w-3.5" />
+                      <Layers className="h-3.5 w-3.5 text-indigo-500" />
                       Generate 4 Logo Variations
                     </button>
                   )}
                 </div>
 
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={paletteQuery}
-                    onChange={(e) => setPaletteQuery(e.target.value)}
-                    placeholder="Search brand color palettes..."
-                    className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                  />
+                <div className="sticky top-0 z-10 -mx-3.5 px-3.5 pt-0.5 pb-2 bg-white/95 dark:bg-[#181B23]/95 backdrop-blur-xs">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={paletteQuery}
+                      onChange={(e) => setPaletteQuery(e.target.value)}
+                      placeholder="Search brand color palettes..."
+                      className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -908,16 +1150,16 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                         key={pal.id}
                         type="button"
                         onClick={() => onApplyPalette(pal)}
-                        className={`flex w-full flex-col gap-2 rounded-xl border p-2.5 text-left shadow-sm transition-colors cursor-pointer ${
+                        className={`flex w-full flex-col gap-2 rounded-xl border p-2.5 text-left shadow-xs transition-all active:scale-95 cursor-pointer ${
                           active
-                            ? 'border-emerald-600 bg-white dark:bg-[#1E202B] ring-1 ring-emerald-600'
-                            : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] hover:border-slate-400 dark:hover:border-slate-500'
+                            ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-500/12 ring-1 ring-indigo-500/50'
+                            : 'studio-card-hover border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D]'
                         }`}
                       >
                         <div className="flex items-center justify-between text-xs font-semibold text-slate-900 dark:text-slate-100">
                           <span>{pal.name}</span>
                           {active && (
-                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-300">
                               Active
                             </span>
                           )}
@@ -981,11 +1223,11 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   }}
                   className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-5 text-center transition-colors ${
                     isDragOverUpload
-                      ? 'border-emerald-600 bg-emerald-50/70 dark:bg-emerald-950/30'
-                      : 'border-[#CBD5E1] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B]'
+                      ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-500/15'
+                      : 'border-[#CBD5E1] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#1E222D]'
                   }`}
                 >
-                  <Upload className="h-6 w-6 text-[#1B4332] dark:text-emerald-400" />
+                  <Upload className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
                   <div>
                     <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                       Drop SVG vector artwork
@@ -997,7 +1239,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   <button
                     type="button"
                     onClick={() => svgUploadRef.current?.click()}
-                    className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#1B4332] to-[#2D6A4F] px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:brightness-110 cursor-pointer"
+                    className="studio-gradient-btn mt-1 inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold cursor-pointer"
                   >
                     <Upload className="h-3.5 w-3.5" />
                     Choose .SVG File
@@ -1006,15 +1248,17 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
 
                 {uploadedSvgs.length > 0 && (
                   <>
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                      <input
-                        type="text"
-                        value={uploadQuery}
-                        onChange={(e) => setUploadQuery(e.target.value)}
-                        placeholder="Search uploaded SVGs..."
-                        className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                      />
+                    <div className="sticky top-0 z-10 -mx-3.5 px-3.5 pt-0.5 pb-2 bg-white/95 dark:bg-[#181B23]/95 backdrop-blur-xs">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={uploadQuery}
+                          onChange={(e) => setUploadQuery(e.target.value)}
+                          placeholder="Search uploaded SVGs..."
+                          className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -1023,7 +1267,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           key={item.id}
                           type="button"
                           onClick={() => onUploadCustomSvg(item.svgText, item.name, false)}
-                          className="flex flex-col items-center gap-1.5 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-2.5 text-center shadow-sm hover:border-emerald-600 cursor-pointer"
+                          className="studio-card-hover flex flex-col items-center gap-1.5 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] p-2.5 text-center shadow-xs active:scale-95 cursor-pointer"
                         >
                           <FileCode2 className="h-6 w-6 text-slate-700 dark:text-slate-300" />
                           <span className="w-full truncate text-[11px] font-medium text-slate-800 dark:text-slate-200">
@@ -1048,15 +1292,17 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             {/* ============================================================== */}
             {activeTab === 'layers' && (
               <div className="space-y-3">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={layerQuery}
-                    onChange={(e) => setLayerQuery(e.target.value)}
-                    placeholder={`Search ${doc.layers.length} layers...`}
-                    className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                  />
+                <div className="sticky top-0 z-10 -mx-3.5 px-3.5 pt-0.5 pb-2 bg-white/95 dark:bg-[#181B23]/95 backdrop-blur-xs">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={layerQuery}
+                      onChange={(e) => setLayerQuery(e.target.value)}
+                      placeholder={`Search ${doc.layers.length} layers...`}
+                      className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -1065,10 +1311,10 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                     return (
                       <div
                         key={layer.id}
-                        className={`flex items-center justify-between gap-1.5 rounded-xl border px-2.5 py-2 text-xs shadow-sm transition-colors ${
+                        className={`flex items-center justify-between gap-1.5 rounded-xl border px-2.5 py-2 text-xs shadow-xs transition-colors ${
                           isSelected
-                            ? 'border-emerald-600 bg-emerald-50/40 dark:bg-emerald-950/30 ring-1 ring-emerald-600'
-                            : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] hover:border-slate-400 dark:hover:border-slate-500'
+                            ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-500/15 ring-1 ring-indigo-500/40'
+                            : 'studio-card-hover border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D]'
                         }`}
                       >
                         <button
@@ -1100,7 +1346,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           <button
                             type="button"
                             onClick={() => onReorderLayer(layer.id, 'up')}
-                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] active:scale-95 cursor-pointer"
                             title="Bring forward"
                           >
                             <ArrowUp className="h-3.5 w-3.5" />
@@ -1108,7 +1354,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           <button
                             type="button"
                             onClick={() => onReorderLayer(layer.id, 'down')}
-                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] active:scale-95 cursor-pointer"
                             title="Send backward"
                           >
                             <ArrowDown className="h-3.5 w-3.5" />
@@ -1116,7 +1362,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           <button
                             type="button"
                             onClick={() => onToggleLayerVisible(layer.id)}
-                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] active:scale-95 cursor-pointer"
                             title={layer.visible ? 'Hide layer' : 'Show layer'}
                           >
                             {layer.visible ? (
@@ -1128,7 +1374,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           <button
                             type="button"
                             onClick={() => onToggleLayerLock(layer.id)}
-                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] active:scale-95 cursor-pointer"
                             title={layer.locked ? 'Unlock layer' : 'Lock layer'}
                           >
                             {layer.locked ? (
@@ -1140,16 +1386,16 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           <button
                             type="button"
                             onClick={() => onDuplicateLayer(layer.id)}
-                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
-                            title="Duplicate layer"
+                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#252836] active:scale-95 cursor-pointer"
+                            title="Duplicate layer (Ctrl/Cmd+D)"
                           >
                             <Copy className="h-3.5 w-3.5" />
                           </button>
                           <button
                             type="button"
                             onClick={() => onDeleteLayer(layer.id)}
-                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-                            title="Delete layer"
+                            className="rounded-lg p-1 text-slate-500 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 active:scale-95 cursor-pointer"
+                            title="Delete layer (Del)"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

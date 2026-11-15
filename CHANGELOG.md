@@ -1,0 +1,22 @@
+# Forma Studio Changelog
+
+## Build 16 — Automated Brand Guidelines Book & Client Presentation
+- **Multi-Page Brand Guidelines PDF**: Upgraded the Export Studio with a 1-click **Download Brand Guidelines PDF** generator outputting a 6-page A4 presentation book: Cover Page, Primary Logo & Lockup System, 1x Clear Space & Minimum Size Rules, Color System (HEX, RGB, CMYK), Typography Hierarchy & Specimens, and Brand Usage Do's & Don'ts (`src/utils/brandBookPdf.ts`, `src/utils/colorSpecs.ts`, `src/components/ExportModal.tsx`).
+- **Shareable Client Presentation Link**: Added a **Share** workflow across the Studio header, Export Studio, and Mockups view producing portable `?client=` presentation URLs rendered in a clean, read-only `ClientPreviewView` featuring Light & Dark backgrounds, 3D perspective business cards & packaging mockups, HEX/RGB/CMYK click-to-copy specs, and interactive client approval sign-off (`src/utils/clientShare.ts`, `src/components/ShareClientModal.tsx`, `src/components/ClientPreviewView.tsx`, `src/App.tsx`).
+
+## Build 15 — Pro Template Library & Precision Controls
+- **Categorized Template Engine**: Added 49 JSON-driven studio templates across `Tech / AI`, `Luxury Fashion`, `Gaming / Esports`, `Cafe / Restaurant`, `Real Estate`, `Minimalist Startup`, and `Beauty / Wellness` with industry filter buttons, search, and live gallery preview (`src/data/proTemplates.json`, `src/utils/templateLibrary.ts`, `src/components/TemplateLibraryModal.tsx`, `src/components/EditorLeftSidebar.tsx`).
+- **Right Layers Drawer & Grouping**: Added collapsible right-side Layers panel with HTML5 drag-to-reorder z-index, Group/Ungroup (`Ctrl/Cmd+G`, `Ctrl/Cmd+Shift+G`), inline double-click renaming, collapsible groups, and a dedicated Background Lock toggle (`src/components/RightLayersDrawer.tsx`, `src/types/logo.ts`, `src/App.tsx`).
+- **Rulers, Bleed & Compositional Grids**: Added toggleable `px`/`mm` workspace edge rulers with cursor tracking, 3mm (`12px`) print bleed crop marks, Rule-of-Thirds guides, and Golden Ratio (`φ`) grid overlays (`src/components/LogoCanvasEditor.tsx`, `src/components/FloatingContextToolbar.tsx`).
+
+## Build 13 — Pro Typography Effects Studio & Smart Monogram Maker
+- **Added Text Styles**: 1-click visual effect cards & SVG renderers for Hollow/Outline, Splice (Offset Shadow), Neon Glow, 3D Extrude Block, Glitch, and Metallic Foil (`src/types/logo.ts`, `src/components/CanvasLayerRenderer.tsx`, `src/components/TextEffectsStudio.tsx`).
+- **Upgraded Text Warp & Shapes**: Expanded curved text into Flat, Arc Up, Arc Down, Circle Ring, sinusoidal Wave paths, and Perspective Slant & Tilt sliders with vector path outlining support (`src/components/CanvasLayerRenderer.tsx`, `src/utils/textToPath.ts`).
+- **Added Smart Monogram Maker**: Dedicated **Monogram** tab on the left tool rail auto-generating 24 interlocking, crest, shield, laurel wreath, and geometric seal layouts from 2 or 3 initials (`src/utils/monogramGenerator.ts`, `src/components/MonogramPanel.tsx`, `src/components/EditorLeftSidebar.tsx`).
+- **Added In-App Update Log**: Interactive build update log accessible from the studio header and landing footer (`src/data/updateLog.ts`, `src/components/UpdateLogModal.tsx`).
+
+## Build 12 — Pro Vector Manipulation & Advanced Gradients (Previous Build)
+- **Boolean Shape Operations**: Added Combine Shapes (`Unite`, `Subtract`, `Intersect`, `Exclude`) using `polygon-clipping` across any 2+ selected shapes, icons, paths, or SVGs (`src/utils/booleanOps.ts`, `src/components/FloatingContextToolbar.tsx`, `src/App.tsx`).
+- **Multi-Stop Gradient & Pattern Builder**: Upgraded fill controls with Solid, Linear, Radial, and Pattern tabs, 2–6 draggable stops, 360° angle dial, radial focal pad, 12 curated presets, and 7 SVG pattern fills (`src/components/GradientPatternPicker.tsx`).
+- **Flip, Mask & Crop**: Added direct 1-click Horizontal/Vertical flip buttons for all layers, preset & layer-to-layer clipping masks, and corner-radius sliders for rectangles and badges (`src/components/CanvasLayerRenderer.tsx`, `src/components/FloatingContextToolbar.tsx`).
+- **Export & Contrast Fixes**: Switched gradients to `userSpaceOnUse`, stripped editor hit-target rects cleanly during SVG export, and extended WCAG contrast inspection to multi-stop and patterned fills (`src/utils/svgExport.ts`, `src/utils/contrastChecker.ts`, `src/utils/brandTools.ts`).

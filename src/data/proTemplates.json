@@ -1,0 +1,728 @@
+[
+  {
+    "id": "tech-nexus-ai",
+    "category": "Tech / AI",
+    "name": "Nexus AI",
+    "subtitle": "Neural Hex Mesh",
+    "tags": ["neural", "ai", "node", "dark", "neon"],
+    "backgroundColor": "#090D16",
+    "palette": { "primary": "#38BDF8", "secondary": "#1E293B", "accent": "#818CF8", "text": "#F8FAFC" },
+    "layers": [
+      { "type": "shape", "name": "Hex Frame", "shapeKind": "hexagon", "x": 325, "y": 115, "width": 150, "height": 150, "fill": "#0F172A", "stroke": "#38BDF8", "strokeWidth": 3 },
+      { "type": "icon", "name": "Neural Node", "iconId": "neural-hex", "x": 350, "y": 140, "width": 100, "height": 100, "fill": "#38BDF8", "accentFill": "#A78BFA", "secondaryFill": "#1E293B" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "NEXUS AI", "fontId": "sora", "fontSize": 56, "fontWeight": 800, "letterSpacing": 0.08, "uppercase": true, "x": 150, "y": 300, "width": 500, "height": 74, "fill": "#F8FAFC", "fillGradient": { "enabled": true, "type": "linear", "angle": 90, "startColor": "#F8FAFC", "endColor": "#38BDF8" } },
+      { "type": "divider", "name": "Tech Rule", "dividerKind": "diamond-center", "x": 270, "y": 392, "width": 260, "height": 14, "fill": "#38BDF8" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "AUTONOMOUS INTELLIGENCE", "fontId": "jetbrains-mono", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 190, "y": 420, "width": 420, "height": 30, "fill": "#94A3B8" }
+    ]
+  },
+  {
+    "id": "tech-prism-core",
+    "category": "Tech / AI",
+    "name": "Prism Core",
+    "subtitle": "Isometric Cube Stack",
+    "tags": ["cube", "prism", "cloud", "infrastructure"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#2563EB", "secondary": "#DBEAFE", "accent": "#4F46E5", "text": "#0F172A" },
+    "layers": [
+      { "type": "shape", "name": "Soft Halo", "shapeKind": "rounded-rect", "cornerRadius": 28, "x": 118, "y": 218, "width": 140, "height": 140, "fill": "#EFF6FF", "stroke": "#BFDBFE", "strokeWidth": 2 },
+      { "type": "icon", "name": "Isometric Prism", "iconId": "geometric-prism", "x": 138, "y": 238, "width": 100, "height": 100, "fill": "#2563EB", "accentFill": "#60A5FA", "secondaryFill": "#1E40AF" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "PRISMCORE", "fontId": "outfit", "fontSize": 56, "fontWeight": 800, "letterSpacing": -0.02, "uppercase": false, "x": 282, "y": 236, "width": 420, "height": 72, "fill": "#0F172A" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "DISTRIBUTED COMPUTE ENGINE", "fontId": "plus-jakarta", "fontSize": 15, "fontWeight": 700, "letterSpacing": 0.16, "uppercase": true, "x": 284, "y": 312, "width": 410, "height": 30, "fill": "#2563EB" }
+    ]
+  },
+  {
+    "id": "tech-orbital-labs",
+    "category": "Tech / AI",
+    "name": "Orbital Labs",
+    "subtitle": "Quantum Ring Lockup",
+    "tags": ["orbit", "quantum", "research", "lab"],
+    "backgroundColor": "#0B1120",
+    "palette": { "primary": "#22D3EE", "secondary": "#164E63", "accent": "#F472B6", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Orbital Ring", "shapeKind": "ring", "x": 320, "y": 110, "width": 160, "height": 160, "fill": "transparent", "stroke": "#22D3EE", "strokeWidth": 4 },
+      { "type": "icon", "name": "Quantum Orbit", "iconId": "quantum-orbit", "x": 344, "y": 134, "width": 112, "height": 112, "fill": "#22D3EE", "accentFill": "#F472B6", "secondaryFill": "#0E7490" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "ORBITAL LABS", "fontId": "syne", "fontSize": 50, "fontWeight": 800, "letterSpacing": 0.04, "uppercase": true, "x": 130, "y": 308, "width": 540, "height": 68, "fill": "#FFFFFF", "textEffect": { "style": "neon", "intensity": 0.9, "primaryColor": "#22D3EE" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "QUANTUM DATA INFRASTRUCTURE", "fontId": "space-mono", "fontSize": 14, "fontWeight": 700, "letterSpacing": 0.18, "uppercase": true, "x": 180, "y": 392, "width": 440, "height": 30, "fill": "#22D3EE" }
+    ]
+  },
+  {
+    "id": "tech-volt-systems",
+    "category": "Tech / AI",
+    "name": "Volt Systems",
+    "subtitle": "Velocity Slant Mark",
+    "tags": ["bolt", "energy", "fast", "cloud", "tech"],
+    "backgroundColor": "#F8FAFC",
+    "palette": { "primary": "#0F172A", "secondary": "#FEF08A", "accent": "#EAB308", "text": "#0F172A" },
+    "layers": [
+      { "type": "shape", "name": "Slant Plate", "shapeKind": "parallelogram", "x": 330, "y": 122, "width": 140, "height": 132, "fill": "#0F172A", "stroke": "#EAB308", "strokeWidth": 3 },
+      { "type": "icon", "name": "Spark Flash", "iconId": "spark-flash", "x": 356, "y": 144, "width": 88, "height": 88, "fill": "#FACC15", "accentFill": "#FFFFFF", "secondaryFill": "#EAB308" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VOLT SYSTEMS", "fontId": "urbanist", "fontSize": 54, "fontWeight": 800, "letterSpacing": 0.05, "uppercase": true, "x": 140, "y": 292, "width": 520, "height": 70, "fill": "#0F172A" },
+      { "type": "divider", "name": "Energy Rule", "dividerKind": "tapered", "x": 260, "y": 374, "width": 280, "height": 10, "fill": "#EAB308" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "REALTIME TELEMETRY GRID", "fontId": "jetbrains-mono", "fontSize": 14, "fontWeight": 500, "letterSpacing": 0.2, "uppercase": true, "x": 190, "y": 402, "width": 420, "height": 28, "fill": "#475569" }
+    ]
+  },
+  {
+    "id": "tech-waveform-audio",
+    "category": "Tech / AI",
+    "name": "Waveform AI",
+    "subtitle": "Generative Voice Matrix",
+    "tags": ["audio", "voice", "ai", "sound", "synthesis"],
+    "backgroundColor": "#111827",
+    "palette": { "primary": "#10B981", "secondary": "#064E3B", "accent": "#34D399", "text": "#F9FAFB" },
+    "layers": [
+      { "type": "shape", "name": "Capsule Back", "shapeKind": "pill", "x": 280, "y": 140, "width": 240, "height": 110, "fill": "#064E3B", "stroke": "#10B981", "strokeWidth": 2 },
+      { "type": "icon", "name": "Equalizer Bars", "iconId": "soundwave-bars", "x": 345, "y": 150, "width": 110, "height": 90, "fill": "#34D399", "accentFill": "#FFFFFF", "secondaryFill": "#059669" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "WAVEFORM", "fontId": "bricolage", "fontSize": 58, "fontWeight": 800, "letterSpacing": 0.03, "uppercase": true, "x": 150, "y": 296, "width": 500, "height": 74, "fill": "#F9FAFB" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "NEURAL ACOUSTIC SYNTHESIS", "fontId": "manrope", "fontSize": 15, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "x": 180, "y": 384, "width": 440, "height": 30, "fill": "#34D399" }
+    ]
+  },
+  {
+    "id": "tech-verdant-node",
+    "category": "Tech / AI",
+    "name": "Verdant OS",
+    "subtitle": "Bio-Compute Identity",
+    "tags": ["eco", "ai", "leaf", "circuit", "clean tech"],
+    "backgroundColor": "#F4F3EF",
+    "palette": { "primary": "#1B4332", "secondary": "#D8CCB4", "accent": "#2D6A4F", "text": "#141413" },
+    "layers": [
+      { "type": "icon", "name": "Leaf Circuit", "iconId": "leaf-circuit", "x": 145, "y": 225, "width": 124, "height": 124, "fill": "#1B4332", "accentFill": "#52B788", "secondaryFill": "#D8CCB4" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VERDANT OS", "fontId": "outfit", "fontSize": 52, "fontWeight": 800, "letterSpacing": -0.01, "uppercase": false, "x": 286, "y": 236, "width": 410, "height": 70, "fill": "#141413" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CLEAN INTELLIGENT INFRASTRUCTURE", "fontId": "plus-jakarta", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.14, "uppercase": true, "x": 288, "y": 312, "width": 410, "height": 28, "fill": "#2D6A4F" }
+    ]
+  },
+  {
+    "id": "fashion-maison-valentin",
+    "category": "Luxury Fashion",
+    "name": "Maison Valentin",
+    "subtitle": "Parisian Crown Crest",
+    "tags": ["couture", "crown", "luxury", "serif", "fashion"],
+    "backgroundColor": "#121316",
+    "palette": { "primary": "#E5BE67", "secondary": "#26282F", "accent": "#F5EFE0", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Atelier Frame", "shapeKind": "frame", "x": 215, "y": 100, "width": 370, "height": 400, "fill": "transparent", "stroke": "#E5BE67", "strokeWidth": 2.5 },
+      { "type": "icon", "name": "Royal Crown", "iconId": "royal-crown", "x": 352, "y": 135, "width": 96, "height": 96, "fill": "#E5BE67", "accentFill": "#F5EFE0", "secondaryFill": "#9A7426" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VALENTIN", "fontId": "bodoni", "fontSize": 58, "fontWeight": 700, "letterSpacing": 0.14, "uppercase": true, "x": 225, "y": 265, "width": 350, "height": 74, "fill": "#F5EFE0", "textEffect": { "style": "foil", "intensity": 1, "primaryColor": "#E5BE67", "secondaryColor": "#FFF3C4" } },
+      { "type": "divider", "name": "Atelier Rule", "dividerKind": "diamond-center", "x": 295, "y": 355, "width": 210, "height": 12, "fill": "#E5BE67" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "MAISON DE HAUTE COUTURE", "fontId": "cinzel", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 235, "y": 388, "width": 330, "height": 28, "fill": "#D4AF37" }
+    ]
+  },
+  {
+    "id": "fashion-atelier-vera",
+    "category": "Luxury Fashion",
+    "name": "Atelier Vera",
+    "subtitle": "Diamond Arch Monolith",
+    "tags": ["diamond", "arch", "jewelry", "luxury", "couture"],
+    "backgroundColor": "#FAF7F2",
+    "palette": { "primary": "#1C1917", "secondary": "#E7DFD3", "accent": "#B45309", "text": "#1C1917" },
+    "layers": [
+      { "type": "shape", "name": "Portal Arch", "shapeKind": "arch", "x": 290, "y": 95, "width": 220, "height": 240, "fill": "transparent", "stroke": "#1C1917", "strokeWidth": 3 },
+      { "type": "icon", "name": "Diamond Facet", "iconId": "diamond-facet", "x": 348, "y": 152, "width": 104, "height": 104, "fill": "#1C1917", "accentFill": "#B45309", "secondaryFill": "#E7DFD3" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "ATELIER VERA", "fontId": "italiana", "fontSize": 56, "fontWeight": 400, "letterSpacing": 0.1, "uppercase": true, "x": 150, "y": 362, "width": 500, "height": 72, "fill": "#1C1917" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "FINE JEWELRY & OBJECTS · MILAN", "fontId": "montserrat", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 190, "y": 444, "width": 420, "height": 28, "fill": "#B45309" }
+    ]
+  },
+  {
+    "id": "fashion-sovereign-house",
+    "category": "Luxury Fashion",
+    "name": "Sovereign",
+    "subtitle": "Heritage Laurel Seal",
+    "tags": ["wreath", "fashion", "heritage", "apparel"],
+    "backgroundColor": "#18181B",
+    "palette": { "primary": "#F4E7D3", "secondary": "#27272A", "accent": "#D4AF37", "text": "#F4E7D3" },
+    "layers": [
+      { "type": "icon", "name": "Laurel Crest", "iconId": "laurel-crest", "x": 335, "y": 122, "width": 130, "height": 130, "fill": "#D4AF37", "accentFill": "#F4E7D3", "secondaryFill": "#27272A" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "SOVEREIGN", "fontId": "cinzel-deco", "fontSize": 52, "fontWeight": 700, "letterSpacing": 0.14, "uppercase": true, "x": 140, "y": 286, "width": 520, "height": 72, "fill": "#F4E7D3" },
+      { "type": "divider", "name": "Crest Line", "dividerKind": "double", "x": 265, "y": 374, "width": 270, "height": 14, "fill": "#D4AF37" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "TAILORED GARMENTS SINCE 1988", "fontId": "dm-sans", "fontSize": 13, "fontWeight": 500, "letterSpacing": 0.26, "uppercase": true, "x": 180, "y": 405, "width": 440, "height": 26, "fill": "#A1A1AA" }
+    ]
+  },
+  {
+    "id": "fashion-noir-silhouette",
+    "category": "Luxury Fashion",
+    "name": "Noir Label",
+    "subtitle": "Interlocking Couture Rings",
+    "tags": ["minimal", "noir", "rings", "boutique"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#111111", "secondary": "#F4F4F5", "accent": "#A16207", "text": "#111111" },
+    "layers": [
+      { "type": "icon", "name": "Infinity Loops", "iconId": "interlock-rings", "x": 338, "y": 145, "width": 124, "height": 124, "fill": "#111111", "accentFill": "#CA8A04", "secondaryFill": "#E5E5E5" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "NOIR SILHOUETTE", "fontId": "prata", "fontSize": 46, "fontWeight": 400, "letterSpacing": 0.12, "uppercase": true, "x": 130, "y": 300, "width": 540, "height": 68, "fill": "#111111" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "READY TO WEAR · COLLECTION IV", "fontId": "josefin-sans", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 180, "y": 384, "width": 440, "height": 28, "fill": "#52525B" }
+    ]
+  },
+  {
+    "id": "fashion-bellini-couture",
+    "category": "Luxury Fashion",
+    "name": "Bellini Milano",
+    "subtitle": "Calligraphic Script Seal",
+    "tags": ["script", "italian", "silk", "couture"],
+    "backgroundColor": "#F9F4EC",
+    "palette": { "primary": "#4A1D1F", "secondary": "#EFE4D6", "accent": "#B68D40", "text": "#2A1215" },
+    "layers": [
+      { "type": "shape", "name": "Seal Ring", "shapeKind": "ring", "x": 270, "y": 115, "width": 260, "height": 260, "fill": "transparent", "stroke": "#B68D40", "strokeWidth": 3 },
+      { "type": "text", "name": "Curved Top", "role": "tagline", "text": "BELLINI MILANO", "fontId": "cinzel", "fontSize": 16, "fontWeight": 700, "letterSpacing": 0.24, "uppercase": true, "curveRadius": 106, "x": 250, "y": 130, "width": 300, "height": 42, "fill": "#4A1D1F" },
+      { "type": "text", "name": "Script Center", "role": "brand", "text": "Bellini", "fontId": "great-vibes", "fontSize": 76, "fontWeight": 400, "letterSpacing": 0.02, "uppercase": false, "x": 230, "y": 205, "width": 340, "height": 90, "fill": "#4A1D1F" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "SILK & LEATHER ATELIER", "fontId": "cormorant", "fontSize": 16, "fontWeight": 700, "letterSpacing": 0.22, "uppercase": true, "x": 200, "y": 405, "width": 400, "height": 30, "fill": "#8A6220" }
+    ]
+  },
+  {
+    "id": "fashion-aurum-house",
+    "category": "Luxury Fashion",
+    "name": "Aurum Atelier",
+    "subtitle": "Gold Foil Monogram Shield",
+    "tags": ["foil", "gold", "crest", "luxury"],
+    "backgroundColor": "#0A0A0B",
+    "palette": { "primary": "#D4AF37", "secondary": "#1F1F23", "accent": "#FCE79C", "text": "#FAF5E8" },
+    "layers": [
+      { "type": "shape", "name": "Gold Crest", "shapeKind": "crest-double", "x": 310, "y": 112, "width": 180, "height": 195, "fill": "#18181B", "stroke": "#D4AF37", "strokeWidth": 3 },
+      { "type": "text", "name": "Monogram Letter", "role": "tagline", "text": "A", "fontId": "playfair", "fontSize": 84, "fontWeight": 700, "letterSpacing": 0, "uppercase": true, "x": 330, "y": 162, "width": 140, "height": 100, "fill": "#D4AF37", "textEffect": { "style": "foil", "intensity": 1, "primaryColor": "#D4AF37", "secondaryColor": "#FFF1B8" } },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "AURUM HOUSE", "fontId": "marcellus", "fontSize": 48, "fontWeight": 400, "letterSpacing": 0.18, "uppercase": true, "x": 150, "y": 338, "width": 500, "height": 68, "fill": "#FAF5E8" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "ARCHIVE EDITION", "fontId": "montserrat", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.28, "uppercase": true, "x": 220, "y": 416, "width": 360, "height": 26, "fill": "#D4AF37" }
+    ]
+  },
+  {
+    "id": "gaming-apex-predator",
+    "category": "Gaming / Esports",
+    "name": "Apex Clan",
+    "subtitle": "Crimson Shield Crest",
+    "tags": ["esports", "clan", "shield", "red", "extrude"],
+    "backgroundColor": "#09090B",
+    "palette": { "primary": "#EF4444", "secondary": "#1F2937", "accent": "#FACC15", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Armor Shield", "shapeKind": "shield", "x": 308, "y": 98, "width": 184, "height": 200, "fill": "#18181B", "stroke": "#EF4444", "strokeWidth": 4 },
+      { "type": "icon", "name": "Apex Peak", "iconId": "apex-mountain", "x": 344, "y": 144, "width": 112, "height": 100, "fill": "#EF4444", "accentFill": "#FACC15", "secondaryFill": "#27272A" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "APEX CLAN", "fontId": "anton", "fontSize": 64, "fontWeight": 400, "letterSpacing": 0.08, "uppercase": true, "x": 160, "y": 318, "width": 480, "height": 80, "fill": "#FFFFFF", "textEffect": { "style": "extrude", "intensity": 1, "offset": 5, "angle": 135, "primaryColor": "#DC2626" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "PRO ESPORTS DIVISION", "fontId": "barlow-condensed", "fontSize": 18, "fontWeight": 700, "letterSpacing": 0.26, "uppercase": true, "x": 220, "y": 412, "width": 360, "height": 30, "fill": "#FACC15" }
+    ]
+  },
+  {
+    "id": "gaming-cyber-falcon",
+    "category": "Gaming / Esports",
+    "name": "Cyber Falcon",
+    "subtitle": "Neon Origami Wing",
+    "tags": ["cyber", "neon", "falcon", "stream", "twitch"],
+    "backgroundColor": "#0F0720",
+    "palette": { "primary": "#EC4899", "secondary": "#3B0764", "accent": "#22D3EE", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Hex Frame", "shapeKind": "hexagon", "x": 318, "y": 110, "width": 164, "height": 164, "fill": "#1E1B4B", "stroke": "#EC4899", "strokeWidth": 3.5 },
+      { "type": "icon", "name": "Swift Falcon", "iconId": "origami-bird", "x": 344, "y": 136, "width": 112, "height": 112, "fill": "#22D3EE", "accentFill": "#EC4899", "secondaryFill": "#312E81" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "CYBER FALCON", "fontId": "oswald", "fontSize": 56, "fontWeight": 700, "letterSpacing": 0.08, "uppercase": true, "x": 140, "y": 298, "width": 520, "height": 74, "fill": "#FFFFFF", "textEffect": { "style": "glitch", "intensity": 1, "offset": 4, "primaryColor": "#22D3EE", "secondaryColor": "#EC4899" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "ARENA STREAMING COLLECTIVE", "fontId": "space-mono", "fontSize": 13, "fontWeight": 700, "letterSpacing": 0.2, "uppercase": true, "x": 180, "y": 388, "width": 440, "height": 28, "fill": "#22D3EE" }
+    ]
+  },
+  {
+    "id": "gaming-titan-aegis",
+    "category": "Gaming / Esports",
+    "name": "Titan Aegis",
+    "subtitle": "Armored Shield Badge",
+    "tags": ["aegis", "shield", "tournament", "gaming"],
+    "backgroundColor": "#11131A",
+    "palette": { "primary": "#F59E0B", "secondary": "#1F2937", "accent": "#38BDF8", "text": "#F8FAFC" },
+    "layers": [
+      { "type": "icon", "name": "Heraldic Shield", "iconId": "sovereign-shield", "x": 324, "y": 110, "width": 152, "height": 152, "fill": "#F59E0B", "accentFill": "#38BDF8", "secondaryFill": "#1E293B" },
+      { "type": "shape", "name": "Banner Strip", "shapeKind": "ribbon-banner", "x": 200, "y": 286, "width": 400, "height": 74, "fill": "#1E293B", "stroke": "#F59E0B", "strokeWidth": 2.5 },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "TITAN AEGIS", "fontId": "archivo-black", "fontSize": 40, "fontWeight": 400, "letterSpacing": 0.06, "uppercase": true, "x": 215, "y": 295, "width": 370, "height": 56, "fill": "#F8FAFC" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "COMPETITIVE GAMING LEAGUE", "fontId": "barlow-condensed", "fontSize": 16, "fontWeight": 700, "letterSpacing": 0.22, "uppercase": true, "x": 210, "y": 382, "width": 380, "height": 28, "fill": "#F59E0B" }
+    ]
+  },
+  {
+    "id": "gaming-strike-zone",
+    "category": "Gaming / Esports",
+    "name": "Strike Zone",
+    "subtitle": "Electric Bolt Emblem",
+    "tags": ["bolt", "action", "fps", "team", "esports"],
+    "backgroundColor": "#050B09",
+    "palette": { "primary": "#22C55E", "secondary": "#14532D", "accent": "#BEF264", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Octagon Core", "shapeKind": "octagon", "x": 318, "y": 114, "width": 164, "height": 164, "fill": "#052E16", "stroke": "#22C55E", "strokeWidth": 4 },
+      { "type": "icon", "name": "Volt Spark", "iconId": "spark-flash", "x": 348, "y": 144, "width": 104, "height": 104, "fill": "#BEF264", "accentFill": "#FFFFFF", "secondaryFill": "#16A34A" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "STRIKE ZONE", "fontId": "league-spartan", "fontSize": 56, "fontWeight": 800, "letterSpacing": 0.05, "uppercase": true, "x": 145, "y": 304, "width": 510, "height": 74, "fill": "#FFFFFF", "textEffect": { "style": "splice", "intensity": 0.9, "offset": 4, "angle": 135, "primaryColor": "#16A34A" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "HIGH VOLTAGE ESPORTS", "fontId": "jetbrains-mono", "fontSize": 14, "fontWeight": 700, "letterSpacing": 0.22, "uppercase": true, "x": 200, "y": 394, "width": 400, "height": 28, "fill": "#4ADE80" }
+    ]
+  },
+  {
+    "id": "gaming-phantom-iris",
+    "category": "Gaming / Esports",
+    "name": "Phantom Squad",
+    "subtitle": "Cyber Iris Reticle",
+    "tags": ["iris", "reticle", "shooter", "esports"],
+    "backgroundColor": "#090B14",
+    "palette": { "primary": "#A855F7", "secondary": "#2E1065", "accent": "#38BDF8", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "icon", "name": "Optic Iris", "iconId": "aperture-iris", "x": 328, "y": 120, "width": 144, "height": 144, "fill": "#A855F7", "accentFill": "#38BDF8", "secondaryFill": "#3B0764" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "PHANTOM", "fontId": "syne", "fontSize": 62, "fontWeight": 800, "letterSpacing": 0.08, "uppercase": true, "x": 150, "y": 296, "width": 500, "height": 76, "fill": "#FFFFFF", "fillGradient": { "enabled": true, "type": "linear", "angle": 45, "startColor": "#38BDF8", "endColor": "#C084FC" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "TACTICAL ARENA TEAM", "fontId": "urbanist", "fontSize": 15, "fontWeight": 700, "letterSpacing": 0.28, "uppercase": true, "x": 200, "y": 388, "width": 400, "height": 28, "fill": "#A855F7" }
+    ]
+  },
+  {
+    "id": "gaming-nova-squad",
+    "category": "Gaming / Esports",
+    "name": "Nova Guild",
+    "subtitle": "Starlight Crest",
+    "tags": ["star", "guild", "rpg", "esports"],
+    "backgroundColor": "#141118",
+    "palette": { "primary": "#F97316", "secondary": "#431407", "accent": "#FDE047", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Star Crest", "shapeKind": "star", "x": 324, "y": 118, "width": 152, "height": 152, "fill": "#F97316", "stroke": "#FDE047", "strokeWidth": 3 },
+      { "type": "icon", "name": "Crown Emblem", "iconId": "royal-crown", "x": 356, "y": 148, "width": 88, "height": 88, "fill": "#141118", "accentFill": "#FDE047", "secondaryFill": "#141118" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "NOVA GUILD", "fontId": "oswald", "fontSize": 58, "fontWeight": 700, "letterSpacing": 0.1, "uppercase": true, "x": 160, "y": 302, "width": 480, "height": 74, "fill": "#FFFFFF" },
+      { "type": "divider", "name": "Tapered Spine", "dividerKind": "tapered", "x": 270, "y": 390, "width": 260, "height": 10, "fill": "#F97316" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CHAMPIONSHIP ROSTER", "fontId": "montserrat", "fontSize": 14, "fontWeight": 700, "letterSpacing": 0.24, "uppercase": true, "x": 200, "y": 414, "width": 400, "height": 26, "fill": "#FDE047" }
+    ]
+  },
+  {
+    "id": "cafe-roast-ember",
+    "category": "Cafe / Restaurant",
+    "name": "Roast & Ember",
+    "subtitle": "Espresso Stamp Seal",
+    "tags": ["coffee", "cafe", "roaster", "vintage", "espresso"],
+    "backgroundColor": "#FAF6EE",
+    "palette": { "primary": "#432818", "secondary": "#EDE0D4", "accent": "#99582A", "text": "#2C1810" },
+    "layers": [
+      { "type": "shape", "name": "Stamp Ring", "shapeKind": "ring", "x": 260, "y": 110, "width": 280, "height": 280, "fill": "transparent", "stroke": "#432818", "strokeWidth": 4 },
+      { "type": "text", "name": "Arch Heading", "role": "brand", "text": "ROAST & EMBER", "fontId": "fraunces", "fontSize": 22, "fontWeight": 700, "letterSpacing": 0.16, "uppercase": true, "curveRadius": 112, "x": 230, "y": 128, "width": 340, "height": 48, "fill": "#432818" },
+      { "type": "icon", "name": "Coffee Cup", "iconId": "coffee-roast", "x": 344, "y": 192, "width": 112, "height": 112, "fill": "#432818", "accentFill": "#99582A", "secondaryFill": "#EDE0D4" },
+      { "type": "text", "name": "Smile Tagline", "role": "tagline", "text": "SPECIALTY COFFEE HOUSE", "fontId": "montserrat", "fontSize": 13, "fontWeight": 700, "letterSpacing": 0.2, "uppercase": true, "curveRadius": -115, "x": 240, "y": 325, "width": 320, "height": 44, "fill": "#99582A" },
+      { "type": "text", "name": "Footer Label", "role": "tagline", "text": "SINGLE ORIGIN · SMALL BATCH", "fontId": "plus-jakarta", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "x": 200, "y": 425, "width": 400, "height": 26, "fill": "#6F4E37" }
+    ]
+  },
+  {
+    "id": "cafe-osteria-terra",
+    "category": "Cafe / Restaurant",
+    "name": "Osteria Terra",
+    "subtitle": "Botanical Culinary Seal",
+    "tags": ["restaurant", "italian", "dining", "bistro", "terracotta"],
+    "backgroundColor": "#FBF7F0",
+    "palette": { "primary": "#B44B31", "secondary": "#EFE6DA", "accent": "#284B3C", "text": "#1C1917" },
+    "layers": [
+      { "type": "shape", "name": "Notary Seal", "shapeKind": "seal-scalloped", "x": 325, "y": 115, "width": 150, "height": 150, "fill": "#EFE6DA", "stroke": "#B44B31", "strokeWidth": 2.5 },
+      { "type": "icon", "name": "Twin Sprout", "iconId": "botanical-twin", "x": 352, "y": 142, "width": 96, "height": 96, "fill": "#284B3C", "accentFill": "#B44B31", "secondaryFill": "#EFE6DA" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "OSTERIA TERRA", "fontId": "yeseva", "fontSize": 52, "fontWeight": 400, "letterSpacing": 0.04, "uppercase": true, "x": 145, "y": 292, "width": 510, "height": 70, "fill": "#1C1917" },
+      { "type": "divider", "name": "Culinary Rule", "dividerKind": "double", "x": 265, "y": 374, "width": 270, "height": 14, "fill": "#B44B31" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "WOOD-FIRED KITCHEN & WINE", "fontId": "lora", "fontSize": 15, "fontWeight": 600, "letterSpacing": 0.18, "uppercase": true, "x": 190, "y": 402, "width": 420, "height": 28, "fill": "#284B3C" }
+    ]
+  },
+  {
+    "id": "cafe-copper-kettle",
+    "category": "Cafe / Restaurant",
+    "name": "Copper Kettle",
+    "subtitle": "Warm Roastery Crest",
+    "tags": ["bakery", "coffee", "warm", "roaster"],
+    "backgroundColor": "#231915",
+    "palette": { "primary": "#D97706", "secondary": "#452B1F", "accent": "#FDE68A", "text": "#FEF3C7" },
+    "layers": [
+      { "type": "icon", "name": "Coffee Cup", "iconId": "coffee-roast", "x": 155, "y": 230, "width": 116, "height": 116, "fill": "#D97706", "accentFill": "#FDE68A", "secondaryFill": "#452B1F" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "Copper Kettle", "fontId": "abril", "fontSize": 56, "fontWeight": 400, "letterSpacing": 0.02, "uppercase": false, "x": 285, "y": 236, "width": 400, "height": 74, "fill": "#FEF3C7" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "ARTISAN ROASTERY & PASTRY", "fontId": "montserrat", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.2, "uppercase": true, "x": 287, "y": 315, "width": 390, "height": 28, "fill": "#D97706" }
+    ]
+  },
+  {
+    "id": "cafe-laurel-bistro",
+    "category": "Cafe / Restaurant",
+    "name": "Laurel Bistro",
+    "subtitle": "French Dining Emblem",
+    "tags": ["bistro", "fine dining", "restaurant", "wreath"],
+    "backgroundColor": "#14261E",
+    "palette": { "primary": "#D4AF37", "secondary": "#1F3A2E", "accent": "#F4F1DE", "text": "#F4F1DE" },
+    "layers": [
+      { "type": "icon", "name": "Laurel Wreath", "iconId": "laurel-crest", "x": 335, "y": 118, "width": 130, "height": 130, "fill": "#D4AF37", "accentFill": "#F4F1DE", "secondaryFill": "#1F3A2E" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "LAUREL BISTRO", "fontId": "playfair", "fontSize": 54, "fontWeight": 700, "letterSpacing": 0.08, "uppercase": true, "x": 145, "y": 282, "width": 510, "height": 72, "fill": "#F4F1DE" },
+      { "type": "divider", "name": "Bistro Rule", "dividerKind": "diamond-center", "x": 285, "y": 370, "width": 230, "height": 12, "fill": "#D4AF37" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "SEASONAL DINING · EST. 2019", "fontId": "cinzel", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "x": 195, "y": 398, "width": 410, "height": 28, "fill": "#D4AF37" }
+    ]
+  },
+  {
+    "id": "cafe-harbor-kitchen",
+    "category": "Cafe / Restaurant",
+    "name": "Harbor Kitchen",
+    "subtitle": "Coastal Seafood Lockup",
+    "tags": ["seafood", "coastal", "restaurant", "wave"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#0F4C81", "secondary": "#E0F2FE", "accent": "#E15A46", "text": "#0F172A" },
+    "layers": [
+      { "type": "icon", "name": "Ocean Wave", "iconId": "ocean-crest", "x": 340, "y": 128, "width": 120, "height": 120, "fill": "#0F4C81", "accentFill": "#E15A46", "secondaryFill": "#E0F2FE" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "HARBOR KITCHEN", "fontId": "barlow-condensed", "fontSize": 58, "fontWeight": 700, "letterSpacing": 0.08, "uppercase": true, "x": 150, "y": 282, "width": 500, "height": 72, "fill": "#0F172A" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "OYSTER BAR & GRILL", "fontId": "plus-jakarta", "fontSize": 15, "fontWeight": 700, "letterSpacing": 0.24, "uppercase": true, "x": 200, "y": 366, "width": 400, "height": 28, "fill": "#E15A46" }
+    ]
+  },
+  {
+    "id": "cafe-brioche-bakery",
+    "category": "Cafe / Restaurant",
+    "name": "Brioche Artisan",
+    "subtitle": "Script Pastry Badge",
+    "tags": ["bakery", "pastry", "script", "patisserie"],
+    "backgroundColor": "#FFF8F0",
+    "palette": { "primary": "#7C2D12", "secondary": "#FED7AA", "accent": "#C2410C", "text": "#431407" },
+    "layers": [
+      { "type": "shape", "name": "Rounded Frame", "shapeKind": "rounded-rect", "cornerRadius": 36, "x": 200, "y": 145, "width": 400, "height": 290, "fill": "#FFFFFF", "stroke": "#C2410C", "strokeWidth": 3 },
+      { "type": "text", "name": "Top Label", "role": "tagline", "text": "BOULANGERIE · PATISSERIE", "fontId": "montserrat", "fontSize": 12, "fontWeight": 700, "letterSpacing": 0.26, "uppercase": true, "x": 225, "y": 195, "width": 350, "height": 26, "fill": "#C2410C" },
+      { "type": "text", "name": "Script Wordmark", "role": "brand", "text": "Brioche", "fontId": "alex-brush", "fontSize": 82, "fontWeight": 400, "letterSpacing": 0.01, "uppercase": false, "x": 215, "y": 235, "width": 370, "height": 96, "fill": "#431407" },
+      { "type": "divider", "name": "Rule", "dividerKind": "solid", "x": 300, "y": 342, "width": 200, "height": 6, "fill": "#C2410C" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "SOURDOUGH & CROISSANTS", "fontId": "lora", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.16, "uppercase": true, "x": 225, "y": 365, "width": 350, "height": 28, "fill": "#7C2D12" }
+    ]
+  },
+  {
+    "id": "realestate-archway",
+    "category": "Real Estate",
+    "name": "Archway Estates",
+    "subtitle": "Keystone Portal Mark",
+    "tags": ["arch", "real estate", "luxury homes", "architecture"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#1E3A5F", "secondary": "#E2E8F0", "accent": "#B45309", "text": "#0F172A" },
+    "layers": [
+      { "type": "icon", "name": "Keystone Arch", "iconId": "architect-arch", "x": 335, "y": 120, "width": 130, "height": 130, "fill": "#1E3A5F", "accentFill": "#B45309", "secondaryFill": "#E2E8F0" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "ARCHWAY ESTATES", "fontId": "cinzel", "fontSize": 46, "fontWeight": 700, "letterSpacing": 0.1, "uppercase": true, "x": 140, "y": 284, "width": 520, "height": 68, "fill": "#0F172A" },
+      { "type": "divider", "name": "Bracket Rule", "dividerKind": "bracket", "x": 260, "y": 366, "width": 280, "height": 12, "fill": "#B45309" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "ARCHITECTURAL BROKERAGE", "fontId": "manrope", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 195, "y": 395, "width": 410, "height": 28, "fill": "#1E3A5F" }
+    ]
+  },
+  {
+    "id": "realestate-monolith",
+    "category": "Real Estate",
+    "name": "Monolith Realty",
+    "subtitle": "Urban Skyline Towers",
+    "tags": ["skyline", "towers", "commercial", "property"],
+    "backgroundColor": "#0F172A",
+    "palette": { "primary": "#F8FAFC", "secondary": "#1E293B", "accent": "#D4AF37", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "icon", "name": "Monolith Towers", "iconId": "skyline-tower", "x": 145, "y": 225, "width": 124, "height": 124, "fill": "#F8FAFC", "accentFill": "#D4AF37", "secondaryFill": "#64748B" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "MONOLITH", "fontId": "montserrat", "fontSize": 54, "fontWeight": 800, "letterSpacing": 0.1, "uppercase": true, "x": 288, "y": 236, "width": 400, "height": 70, "fill": "#FFFFFF" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "COMMERCIAL & RESIDENTIAL REALTY", "fontId": "dm-sans", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.16, "uppercase": true, "x": 290, "y": 312, "width": 400, "height": 28, "fill": "#D4AF37" }
+    ]
+  },
+  {
+    "id": "realestate-keystone",
+    "category": "Real Estate",
+    "name": "Keystone Homes",
+    "subtitle": "Gable Peak Emblem",
+    "tags": ["homes", "roof", "residential", "builder"],
+    "backgroundColor": "#F8FAFC",
+    "palette": { "primary": "#1B4332", "secondary": "#D8F3DC", "accent": "#C4912C", "text": "#1B4332" },
+    "layers": [
+      { "type": "shape", "name": "Rounded Card", "shapeKind": "rounded-rect", "cornerRadius": 22, "x": 332, "y": 126, "width": 136, "height": 136, "fill": "#1B4332", "stroke": "none", "strokeWidth": 0 },
+      { "type": "icon", "name": "Apex Roof", "iconId": "apex-mountain", "x": 354, "y": 148, "width": 92, "height": 92, "fill": "#FFFFFF", "accentFill": "#C4912C", "secondaryFill": "#D8F3DC" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "KEYSTONE HOMES", "fontId": "outfit", "fontSize": 50, "fontWeight": 700, "letterSpacing": 0.04, "uppercase": true, "x": 150, "y": 296, "width": 500, "height": 68, "fill": "#1B4332" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CUSTOM ARCHITECTURAL BUILDERS", "fontId": "plus-jakarta", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.2, "uppercase": true, "x": 190, "y": 374, "width": 420, "height": 28, "fill": "#C4912C" }
+    ]
+  },
+  {
+    "id": "realestate-harborview",
+    "category": "Real Estate",
+    "name": "Harborview Realty",
+    "subtitle": "North Star Heritage Seal",
+    "tags": ["compass", "waterfront", "realty", "luxury"],
+    "backgroundColor": "#10231C",
+    "palette": { "primary": "#F4F1DE", "secondary": "#1B4332", "accent": "#74C69D", "text": "#F4F1DE" },
+    "layers": [
+      { "type": "icon", "name": "Compass Rose", "iconId": "compass-rose", "x": 340, "y": 122, "width": 120, "height": 120, "fill": "#F4F1DE", "accentFill": "#74C69D", "secondaryFill": "#1B4332" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "HARBORVIEW", "fontId": "libre-baskerville", "fontSize": 48, "fontWeight": 700, "letterSpacing": 0.1, "uppercase": true, "x": 150, "y": 278, "width": 500, "height": 68, "fill": "#F4F1DE" },
+      { "type": "divider", "name": "Dotted Line", "dividerKind": "dotted", "x": 270, "y": 362, "width": 260, "height": 10, "fill": "#74C69D" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "WATERFRONT & ESTATE PROPERTIES", "fontId": "montserrat", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "x": 180, "y": 390, "width": 440, "height": 28, "fill": "#74C69D" }
+    ]
+  },
+  {
+    "id": "realestate-skyline-group",
+    "category": "Real Estate",
+    "name": "Skyline Capital",
+    "subtitle": "Split Geometric Towers",
+    "tags": ["skyline", "development", "urban", "capital"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#111827", "secondary": "#E5E7EB", "accent": "#2563EB", "text": "#111827" },
+    "layers": [
+      { "type": "text", "name": "Left Word", "role": "brand", "text": "SKYLINE", "fontId": "urbanist", "fontSize": 44, "fontWeight": 800, "letterSpacing": 0.08, "uppercase": true, "x": 80, "y": 266, "width": 235, "height": 60, "fill": "#111827" },
+      { "type": "icon", "name": "Center Tower", "iconId": "skyline-tower", "x": 344, "y": 230, "width": 112, "height": 112, "fill": "#111827", "accentFill": "#2563EB", "secondaryFill": "#9CA3AF" },
+      { "type": "text", "name": "Right Word", "role": "tagline", "text": "CAPITAL", "fontId": "urbanist", "fontSize": 44, "fontWeight": 600, "letterSpacing": 0.08, "uppercase": true, "x": 485, "y": 266, "width": 235, "height": 60, "fill": "#2563EB" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "URBAN REAL ESTATE DEVELOPMENT", "fontId": "plus-jakarta", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 190, "y": 384, "width": 420, "height": 26, "fill": "#64748B" }
+    ]
+  },
+  {
+    "id": "realestate-crown-manor",
+    "category": "Real Estate",
+    "name": "Crown & Manor",
+    "subtitle": "Framed Estate Crest",
+    "tags": ["manor", "crown", "luxury estates", "badge"],
+    "backgroundColor": "#F9F7F3",
+    "palette": { "primary": "#292524", "secondary": "#E7E5E4", "accent": "#9A6B2F", "text": "#1C1917" },
+    "layers": [
+      { "type": "shape", "name": "Arch Frame", "shapeKind": "crest-double", "x": 270, "y": 115, "width": 260, "height": 345, "fill": "#FFFFFF", "stroke": "#9A6B2F", "strokeWidth": 3 },
+      { "type": "icon", "name": "Crown", "iconId": "royal-crown", "x": 360, "y": 152, "width": 80, "height": 80, "fill": "#292524", "accentFill": "#9A6B2F", "secondaryFill": "#E7E5E4" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "CROWN & MANOR", "fontId": "marcellus", "fontSize": 28, "fontWeight": 400, "letterSpacing": 0.14, "uppercase": true, "x": 282, "y": 266, "width": 236, "height": 44, "fill": "#1C1917" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "PRIVATE ESTATES", "fontId": "montserrat", "fontSize": 11, "fontWeight": 700, "letterSpacing": 0.26, "uppercase": true, "x": 295, "y": 324, "width": 210, "height": 24, "fill": "#9A6B2F" }
+    ]
+  },
+  {
+    "id": "startup-flowstate",
+    "category": "Minimalist Startup",
+    "name": "Flowstate",
+    "subtitle": "Swiss Ribbon Mark",
+    "tags": ["ribbon", "saas", "productivity", "minimal"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#111111", "secondary": "#E5E5E5", "accent": "#4F46E5", "text": "#111111" },
+    "layers": [
+      { "type": "icon", "name": "Folded Ribbon", "iconId": "ribbon-s", "x": 152, "y": 230, "width": 118, "height": 118, "fill": "#111111", "accentFill": "#4F46E5", "secondaryFill": "#A5B4FC" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "flowstate", "fontId": "plus-jakarta", "fontSize": 60, "fontWeight": 800, "letterSpacing": -0.03, "uppercase": false, "x": 286, "y": 236, "width": 390, "height": 74, "fill": "#111111" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "ASYNC WORKSPACE FOR MAKERS", "fontId": "dm-sans", "fontSize": 14, "fontWeight": 500, "letterSpacing": 0.14, "uppercase": true, "x": 288, "y": 316, "width": 390, "height": 28, "fill": "#6B7280" }
+    ]
+  },
+  {
+    "id": "startup-kinetic",
+    "category": "Minimalist Startup",
+    "name": "Kinetic",
+    "subtitle": "Twin Circle Geometry",
+    "tags": ["fintech", "startup", "minimal", "rings"],
+    "backgroundColor": "#0F172A",
+    "palette": { "primary": "#FFFFFF", "secondary": "#1E293B", "accent": "#38BDF8", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "icon", "name": "Interlock Rings", "iconId": "interlock-rings", "x": 344, "y": 142, "width": 112, "height": 112, "fill": "#FFFFFF", "accentFill": "#38BDF8", "secondaryFill": "#1E293B" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "kinetic.", "fontId": "outfit", "fontSize": 64, "fontWeight": 700, "letterSpacing": -0.03, "uppercase": false, "x": 180, "y": 282, "width": 440, "height": 78, "fill": "#FFFFFF" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "TREASURY AUTOMATION", "fontId": "jetbrains-mono", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 210, "y": 374, "width": 380, "height": 28, "fill": "#38BDF8" }
+    ]
+  },
+  {
+    "id": "startup-nordic-peak",
+    "category": "Minimalist Startup",
+    "name": "Nordic Peak",
+    "subtitle": "Clean Scandinavian Horizon",
+    "tags": ["minimal", "nordic", "mountain", "climate"],
+    "backgroundColor": "#F8FAFC",
+    "palette": { "primary": "#0F172A", "secondary": "#E2E8F0", "accent": "#0D9488", "text": "#0F172A" },
+    "layers": [
+      { "type": "icon", "name": "Minimal Peak", "iconId": "apex-mountain", "x": 340, "y": 140, "width": 120, "height": 120, "fill": "#0F172A", "accentFill": "#0D9488", "secondaryFill": "#E2E8F0" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "NORDIC PEAK", "fontId": "manrope", "fontSize": 48, "fontWeight": 800, "letterSpacing": 0.12, "uppercase": true, "x": 150, "y": 292, "width": 500, "height": 66, "fill": "#0F172A" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CARBON ACCOUNTING PLATFORM", "fontId": "dm-sans", "fontSize": 14, "fontWeight": 500, "letterSpacing": 0.2, "uppercase": true, "x": 190, "y": 370, "width": 420, "height": 28, "fill": "#0D9488" }
+    ]
+  },
+  {
+    "id": "startup-northstar",
+    "category": "Minimalist Startup",
+    "name": "Northstar",
+    "subtitle": "Editorial Guiding Star",
+    "tags": ["northstar", "product", "saas", "compass"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#18181B", "secondary": "#F4F4F5", "accent": "#EA580C", "text": "#18181B" },
+    "layers": [
+      { "type": "icon", "name": "North Star", "iconId": "compass-rose", "x": 148, "y": 236, "width": 108, "height": 108, "fill": "#18181B", "accentFill": "#EA580C", "secondaryFill": "#F4F4F5" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "Northstar", "fontId": "bricolage", "fontSize": 60, "fontWeight": 700, "letterSpacing": -0.02, "uppercase": false, "x": 276, "y": 234, "width": 400, "height": 74, "fill": "#18181B" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "PRODUCT ROADMAP INTELLIGENCE", "fontId": "plus-jakarta", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.16, "uppercase": true, "x": 278, "y": 314, "width": 400, "height": 28, "fill": "#71717A" }
+    ]
+  },
+  {
+    "id": "startup-atelier-ink",
+    "category": "Minimalist Startup",
+    "name": "Atelier Ink",
+    "subtitle": "Editorial Publishing Mark",
+    "tags": ["writing", "pen", "publishing", "editorial"],
+    "backgroundColor": "#F6F5F0",
+    "palette": { "primary": "#18181B", "secondary": "#E4E4E7", "accent": "#B91C1C", "text": "#18181B" },
+    "layers": [
+      { "type": "icon", "name": "Pen Nib", "iconId": "pen-nib", "x": 344, "y": 135, "width": 112, "height": 112, "fill": "#18181B", "accentFill": "#B91C1C", "secondaryFill": "#E4E4E7" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "Atelier Ink.", "fontId": "dm-serif", "fontSize": 60, "fontWeight": 400, "letterSpacing": 0.01, "uppercase": false, "x": 160, "y": 282, "width": 480, "height": 74, "fill": "#18181B" },
+      { "type": "divider", "name": "Rule", "dividerKind": "solid", "x": 330, "y": 370, "width": 140, "height": 6, "fill": "#B91C1C" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "INDEPENDENT PUBLISHING TOOLS", "fontId": "dm-sans", "fontSize": 14, "fontWeight": 500, "letterSpacing": 0.18, "uppercase": true, "x": 195, "y": 392, "width": 410, "height": 28, "fill": "#52525B" }
+    ]
+  },
+  {
+    "id": "startup-linearity",
+    "category": "Minimalist Startup",
+    "name": "Linearity",
+    "subtitle": "Monochrome Prism Grid",
+    "tags": ["swiss", "prism", "design", "startup"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#111111", "secondary": "#F5F5F5", "accent": "#525252", "text": "#111111" },
+    "layers": [
+      { "type": "shape", "name": "Swiss Border", "shapeKind": "rounded-rect", "cornerRadius": 18, "x": 160, "y": 175, "width": 480, "height": 240, "fill": "#FFFFFF", "stroke": "#111111", "strokeWidth": 3 },
+      { "type": "icon", "name": "Prism", "iconId": "geometric-prism", "x": 200, "y": 236, "width": 116, "height": 116, "fill": "#111111", "accentFill": "#D4D4D8", "secondaryFill": "#525252" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "LINEARITY", "fontId": "sora", "fontSize": 46, "fontWeight": 800, "letterSpacing": 0.08, "uppercase": true, "x": 336, "y": 246, "width": 270, "height": 60, "fill": "#111111" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "VECTOR DESIGN INFRASTRUCTURE", "fontId": "jetbrains-mono", "fontSize": 11, "fontWeight": 700, "letterSpacing": 0.16, "uppercase": true, "x": 338, "y": 318, "width": 270, "height": 26, "fill": "#525252" }
+    ]
+  },
+  {
+    "id": "beauty-serenity-botanicals",
+    "category": "Beauty / Wellness",
+    "name": "Serenity Botanicals",
+    "subtitle": "Sage Leaf Emblem",
+    "tags": ["skincare", "botanical", "sage", "wellness", "organic"],
+    "backgroundColor": "#F4F6F1",
+    "palette": { "primary": "#2D4A3E", "secondary": "#DCE5D8", "accent": "#8C6239", "text": "#1F332B" },
+    "layers": [
+      { "type": "shape", "name": "Soft Badge", "shapeKind": "circle", "x": 328, "y": 118, "width": 144, "height": 144, "fill": "#DCE5D8", "stroke": "#2D4A3E", "strokeWidth": 2 },
+      { "type": "icon", "name": "Twin Sprout", "iconId": "botanical-twin", "x": 352, "y": 142, "width": 96, "height": 96, "fill": "#2D4A3E", "accentFill": "#8C6239", "secondaryFill": "#DCE5D8" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "SERENITY", "fontId": "cormorant", "fontSize": 60, "fontWeight": 700, "letterSpacing": 0.14, "uppercase": true, "x": 155, "y": 290, "width": 490, "height": 74, "fill": "#1F332B" },
+      { "type": "divider", "name": "Botanical Rule", "dividerKind": "diamond-center", "x": 280, "y": 376, "width": 240, "height": 12, "fill": "#8C6239" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "PURE BOTANICAL SKINCARE", "fontId": "josefin-sans", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 195, "y": 404, "width": 410, "height": 28, "fill": "#2D4A3E" }
+    ]
+  },
+  {
+    "id": "beauty-vitalia-spa",
+    "category": "Beauty / Wellness",
+    "name": "Vitalia Spa",
+    "subtitle": "Holistic Heart & Arch",
+    "tags": ["spa", "holistic", "clinic", "wellness"],
+    "backgroundColor": "#FDF6F3",
+    "palette": { "primary": "#9D4E42", "secondary": "#F7E1DB", "accent": "#2E5248", "text": "#2A1E1C" },
+    "layers": [
+      { "type": "shape", "name": "Spa Arch", "shapeKind": "arch", "x": 300, "y": 102, "width": 200, "height": 210, "fill": "#F7E1DB", "stroke": "#9D4E42", "strokeWidth": 2.5 },
+      { "type": "icon", "name": "Vital Heart", "iconId": "vital-pulse", "x": 350, "y": 152, "width": 100, "height": 100, "fill": "#9D4E42", "accentFill": "#2E5248", "secondaryFill": "#F7E1DB" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VITALIA SPA", "fontId": "fraunces", "fontSize": 52, "fontWeight": 700, "letterSpacing": 0.06, "uppercase": true, "x": 150, "y": 340, "width": 500, "height": 68, "fill": "#2A1E1C" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "MINDFUL BODY & RITUAL STUDIO", "fontId": "plus-jakarta", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.2, "uppercase": true, "x": 190, "y": 420, "width": 420, "height": 28, "fill": "#9D4E42" }
+    ]
+  },
+  {
+    "id": "beauty-aura-skincare",
+    "category": "Beauty / Wellness",
+    "name": "Aura Skin",
+    "subtitle": "Rose Gradient Crest",
+    "tags": ["skincare", "beauty", "cosmetics", "gradient"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#BE185D", "secondary": "#FCE7F3", "accent": "#F59E0B", "text": "#1F2937" },
+    "layers": [
+      { "type": "icon", "name": "Flow Wave", "iconId": "ocean-crest", "x": 338, "y": 130, "width": 124, "height": 124, "fill": "#BE185D", "accentFill": "#F472B6", "secondaryFill": "#FCE7F3", "fillGradient": { "enabled": true, "type": "linear", "angle": 135, "startColor": "#EC4899", "endColor": "#F59E0B" } },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "AURA SKIN", "fontId": "bodoni", "fontSize": 56, "fontWeight": 700, "letterSpacing": 0.1, "uppercase": true, "x": 160, "y": 288, "width": 480, "height": 70, "fill": "#1F2937" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "RADIANCE FORMULATIONS", "fontId": "montserrat", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 200, "y": 372, "width": 400, "height": 28, "fill": "#BE185D" }
+    ]
+  },
+  {
+    "id": "beauty-lotus-leaf",
+    "category": "Beauty / Wellness",
+    "name": "Lotus & Leaf",
+    "subtitle": "Apothecary Laurel Seal",
+    "tags": ["apothecary", "perfume", "wreath", "luxury beauty"],
+    "backgroundColor": "#1C1917",
+    "palette": { "primary": "#E2B18E", "secondary": "#292524", "accent": "#FAF5F0", "text": "#FAF5F0" },
+    "layers": [
+      { "type": "shape", "name": "Ring Frame", "shapeKind": "ring", "x": 265, "y": 110, "width": 270, "height": 270, "fill": "transparent", "stroke": "#E2B18E", "strokeWidth": 2.5 },
+      { "type": "icon", "name": "Laurel", "iconId": "laurel-crest", "x": 344, "y": 160, "width": 112, "height": 112, "fill": "#E2B18E", "accentFill": "#FAF5F0", "secondaryFill": "#292524" },
+      { "type": "text", "name": "Curved Top", "role": "tagline", "text": "BOTANICAL APOTHECARY", "fontId": "cinzel", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "curveRadius": 110, "x": 250, "y": 124, "width": 300, "height": 42, "fill": "#E2B18E" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "LOTUS & LEAF", "fontId": "prata", "fontSize": 46, "fontWeight": 400, "letterSpacing": 0.12, "uppercase": true, "x": 150, "y": 406, "width": 500, "height": 64, "fill": "#FAF5F0" }
+    ]
+  },
+  {
+    "id": "beauty-pure-equilibrium",
+    "category": "Beauty / Wellness",
+    "name": "Equilibrium",
+    "subtitle": "Balanced Holistic Script",
+    "tags": ["yoga", "pilates", "balance", "wellness"],
+    "backgroundColor": "#FAF9F6",
+    "palette": { "primary": "#3F4E4F", "secondary": "#DCD7C9", "accent": "#A27B5C", "text": "#2C3639" },
+    "layers": [
+      { "type": "icon", "name": "Balance Mark", "iconId": "justice-scales", "x": 344, "y": 135, "width": 112, "height": 112, "fill": "#3F4E4F", "accentFill": "#A27B5C", "secondaryFill": "#DCD7C9" },
+      { "type": "text", "name": "Script Name", "role": "brand", "text": "Equilibrium", "fontId": "sacramento", "fontSize": 74, "fontWeight": 400, "letterSpacing": 0.02, "uppercase": false, "x": 150, "y": 265, "width": 500, "height": 86, "fill": "#2C3639" },
+      { "type": "divider", "name": "Rule", "dividerKind": "tapered", "x": 270, "y": 368, "width": 260, "height": 10, "fill": "#A27B5C" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "PILATES · BREATHWORK · RETREAT", "fontId": "josefin-sans", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "x": 190, "y": 396, "width": 420, "height": 28, "fill": "#3F4E4F" }
+    ]
+  },
+  {
+    "id": "beauty-lumina-studio",
+    "category": "Beauty / Wellness",
+    "name": "Lumina Salon",
+    "subtitle": "Champagne Diamond Glow",
+    "tags": ["salon", "hair", "esthetics", "diamond"],
+    "backgroundColor": "#FAF5F0",
+    "palette": { "primary": "#834C69", "secondary": "#F3E8EE", "accent": "#C4915C", "text": "#2D1E26" },
+    "layers": [
+      { "type": "icon", "name": "Diamond", "iconId": "diamond-facet", "x": 344, "y": 136, "width": 112, "height": 112, "fill": "#834C69", "accentFill": "#C4915C", "secondaryFill": "#F3E8EE" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "LUMINA STUDIO", "fontId": "italiana", "fontSize": 52, "fontWeight": 400, "letterSpacing": 0.12, "uppercase": true, "x": 150, "y": 282, "width": 500, "height": 68, "fill": "#2D1E26" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "AESTHETICS & BEAUTY BAR", "fontId": "dm-sans", "fontSize": 14, "fontWeight": 500, "letterSpacing": 0.24, "uppercase": true, "x": 200, "y": 366, "width": 400, "height": 28, "fill": "#834C69" }
+    ]
+  },
+  {
+    "id": "tech-synapse-cloud",
+    "category": "Tech / AI",
+    "name": "Synapse Cloud",
+    "subtitle": "Hollow Vector Lockup",
+    "tags": ["cloud", "ai", "dev", "hollow"],
+    "backgroundColor": "#0B0F19",
+    "palette": { "primary": "#6366F1", "secondary": "#1E1B4B", "accent": "#38BDF8", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "icon", "name": "Interlock", "iconId": "interlock-rings", "x": 348, "y": 140, "width": 104, "height": 104, "fill": "#6366F1", "accentFill": "#38BDF8", "secondaryFill": "#1E1B4B" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "SYNAPSE", "fontId": "archivo-black", "fontSize": 60, "fontWeight": 400, "letterSpacing": 0.08, "uppercase": true, "x": 150, "y": 276, "width": 500, "height": 76, "fill": "#FFFFFF", "textEffect": { "style": "hollow", "intensity": 1, "offset": 2.5, "primaryColor": "#38BDF8" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "DEVELOPER INFERENCE API", "fontId": "jetbrains-mono", "fontSize": 13, "fontWeight": 600, "letterSpacing": 0.22, "uppercase": true, "x": 200, "y": 370, "width": 400, "height": 28, "fill": "#818CF8" }
+    ]
+  },
+  {
+    "id": "fashion-velvet-atelier",
+    "category": "Luxury Fashion",
+    "name": "Velvet Atelier",
+    "subtitle": "Editorial Pill Crest",
+    "tags": ["boutique", "fashion", "capsule", "editorial"],
+    "backgroundColor": "#F5F2EB",
+    "palette": { "primary": "#1C1917", "secondary": "#E7E0D4", "accent": "#7F1D1D", "text": "#1C1917" },
+    "layers": [
+      { "type": "shape", "name": "Pill Frame", "shapeKind": "pill", "x": 200, "y": 210, "width": 400, "height": 140, "fill": "transparent", "stroke": "#1C1917", "strokeWidth": 3 },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VELVET", "fontId": "playfair", "fontSize": 56, "fontWeight": 700, "letterSpacing": 0.16, "uppercase": true, "x": 220, "y": 236, "width": 360, "height": 70, "fill": "#1C1917" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "PARIS · LONDON · TOKYO", "fontId": "montserrat", "fontSize": 12, "fontWeight": 700, "letterSpacing": 0.26, "uppercase": true, "x": 220, "y": 308, "width": 360, "height": 24, "fill": "#7F1D1D" }
+    ]
+  },
+  {
+    "id": "gaming-blaze-esports",
+    "category": "Gaming / Esports",
+    "name": "Blaze Arena",
+    "subtitle": "3D Extruded Triangle",
+    "tags": ["blaze", "triangle", "tournament", "esports"],
+    "backgroundColor": "#0C0A09",
+    "palette": { "primary": "#F97316", "secondary": "#292524", "accent": "#FACC15", "text": "#FFFFFF" },
+    "layers": [
+      { "type": "shape", "name": "Tri Emblem", "shapeKind": "triangle", "x": 325, "y": 115, "width": 150, "height": 140, "fill": "#F97316", "stroke": "#FACC15", "strokeWidth": 3 },
+      { "type": "icon", "name": "Bolt", "iconId": "spark-flash", "x": 360, "y": 158, "width": 80, "height": 80, "fill": "#0C0A09", "accentFill": "#FFFFFF", "secondaryFill": "#FACC15" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "BLAZE ARENA", "fontId": "anton", "fontSize": 58, "fontWeight": 400, "letterSpacing": 0.08, "uppercase": true, "x": 150, "y": 292, "width": 500, "height": 76, "fill": "#FFFFFF", "textEffect": { "style": "extrude", "intensity": 1, "offset": 4, "angle": 135, "primaryColor": "#EA580C" } },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "BATTLEGROUND CHAMPIONS", "fontId": "barlow-condensed", "fontSize": 17, "fontWeight": 700, "letterSpacing": 0.24, "uppercase": true, "x": 200, "y": 386, "width": 400, "height": 28, "fill": "#FACC15" }
+    ]
+  },
+  {
+    "id": "cafe-matcha-house",
+    "category": "Cafe / Restaurant",
+    "name": "Matcha House",
+    "subtitle": "Japanese Tea House Mark",
+    "tags": ["tea", "matcha", "cafe", "leaf", "organic"],
+    "backgroundColor": "#F3F6EE",
+    "palette": { "primary": "#2D5A27", "secondary": "#DCE8D0", "accent": "#8D6E63", "text": "#1B2E19" },
+    "layers": [
+      { "type": "shape", "name": "Circle", "shapeKind": "circle", "x": 335, "y": 124, "width": 130, "height": 130, "fill": "#2D5A27", "stroke": "none", "strokeWidth": 0 },
+      { "type": "icon", "name": "Leaf Sprout", "iconId": "botanical-twin", "x": 356, "y": 146, "width": 88, "height": 88, "fill": "#FFFFFF", "accentFill": "#A3E635", "secondaryFill": "#DCE8D0" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "MATCHA HOUSE", "fontId": "marcellus", "fontSize": 48, "fontWeight": 400, "letterSpacing": 0.1, "uppercase": true, "x": 150, "y": 288, "width": 500, "height": 68, "fill": "#1B2E19" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CEREMONIAL TEA BAR", "fontId": "plus-jakarta", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.24, "uppercase": true, "x": 200, "y": 370, "width": 400, "height": 28, "fill": "#2D5A27" }
+    ]
+  },
+  {
+    "id": "realestate-veranda-group",
+    "category": "Real Estate",
+    "name": "Veranda Realty",
+    "subtitle": "Warm Terracotta Arch",
+    "tags": ["villa", "Mediterranean", "arch", "real estate"],
+    "backgroundColor": "#FBF8F3",
+    "palette": { "primary": "#9A3412", "secondary": "#FFEDD5", "accent": "#1E3A2F", "text": "#292524" },
+    "layers": [
+      { "type": "icon", "name": "Arch Mark", "iconId": "architect-arch", "x": 148, "y": 228, "width": 120, "height": 120, "fill": "#9A3412", "accentFill": "#1E3A2F", "secondaryFill": "#FFEDD5" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VERANDA", "fontId": "fraunces", "fontSize": 56, "fontWeight": 700, "letterSpacing": 0.04, "uppercase": true, "x": 285, "y": 236, "width": 390, "height": 70, "fill": "#292524" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "COASTAL VILLA REALTY", "fontId": "montserrat", "fontSize": 14, "fontWeight": 700, "letterSpacing": 0.22, "uppercase": true, "x": 288, "y": 312, "width": 380, "height": 28, "fill": "#9A3412" }
+    ]
+  },
+  {
+    "id": "startup-vector-labs",
+    "category": "Minimalist Startup",
+    "name": "Vector Studio",
+    "subtitle": "Aperture Minimal Lockup",
+    "tags": ["camera", "design", "startup", "media"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#0F172A", "secondary": "#E2E8F0", "accent": "#0EA5E9", "text": "#0F172A" },
+    "layers": [
+      { "type": "icon", "name": "Aperture", "iconId": "aperture-iris", "x": 344, "y": 135, "width": 112, "height": 112, "fill": "#0F172A", "accentFill": "#0EA5E9", "secondaryFill": "#E2E8F0" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "VECTOR STUDIO", "fontId": "sora", "fontSize": 48, "fontWeight": 700, "letterSpacing": 0.06, "uppercase": true, "x": 150, "y": 280, "width": 500, "height": 66, "fill": "#0F172A" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CREATIVE WORKFLOW ENGINE", "fontId": "dm-sans", "fontSize": 14, "fontWeight": 500, "letterSpacing": 0.22, "uppercase": true, "x": 195, "y": 360, "width": 410, "height": 28, "fill": "#0EA5E9" }
+    ]
+  },
+  {
+    "id": "beauty-petal-clinic",
+    "category": "Beauty / Wellness",
+    "name": "Petal Dermatology",
+    "subtitle": "Clean Clinical Minimal",
+    "tags": ["dermatology", "clinic", "skin", "medical wellness"],
+    "backgroundColor": "#FFFFFF",
+    "palette": { "primary": "#0F766E", "secondary": "#CCFBF1", "accent": "#D97706", "text": "#134E4A" },
+    "layers": [
+      { "type": "icon", "name": "Heart Pulse", "iconId": "vital-pulse", "x": 152, "y": 235, "width": 112, "height": 112, "fill": "#0F766E", "accentFill": "#D97706", "secondaryFill": "#CCFBF1" },
+      { "type": "text", "name": "Wordmark", "role": "brand", "text": "Petal Clinic", "fontId": "dm-serif", "fontSize": 56, "fontWeight": 400, "letterSpacing": 0.01, "uppercase": false, "x": 284, "y": 236, "width": 390, "height": 72, "fill": "#134E4A" },
+      { "type": "text", "name": "Tagline", "role": "tagline", "text": "CLINICAL SKIN & WELLNESS", "fontId": "plus-jakarta", "fontSize": 14, "fontWeight": 600, "letterSpacing": 0.18, "uppercase": true, "x": 286, "y": 314, "width": 380, "height": 28, "fill": "#0F766E" }
+    ]
+  }
+]

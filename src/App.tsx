@@ -1,8 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Moon, Sun } from 'lucide-react';
+import {
+  Check,
+  Download,
+  History,
+  LayoutTemplate,
+  Loader2,
+  Moon,
+  Redo2,
+  Share2,
+  Sparkles,
+  Sun,
+  Undo2,
+} from 'lucide-react';
 import { BrandBriefGrid } from './components/BrandBriefGrid';
 import { BrandKitView } from './components/BrandKitView';
 import { TracedSymbolPayload } from './components/AiMagicPanel';
+import { ClientPreviewView } from './components/ClientPreviewView';
 import { EditorLeftSidebar, UploadedSvgEntry } from './components/EditorLeftSidebar';
 import { ExportModal } from './components/ExportModal';
 import { LandingView } from './components/LandingView';
@@ -10,6 +23,10 @@ import { LogoCanvasEditor } from './components/LogoCanvasEditor';
 import { LogoWizardModal } from './components/LogoWizardModal';
 import { MockupPreviewView } from './components/MockupPreviewView';
 import { ProjectsDashboard } from './components/ProjectsDashboard';
+import { RightLayersDrawer } from './components/RightLayersDrawer';
+import { ShareClientModal } from './components/ShareClientModal';
+import { TemplateLibraryModal } from './components/TemplateLibraryModal';
+import { UpdateLogModal } from './components/UpdateLogModal';
 import { VariationsModal } from './components/VariationsModal';
 import { VisitingCardAtelier } from './components/VisitingCardAtelier';
 import { StudioLogoProvider } from './context/StudioLogoContext';
@@ -64,7 +81,12 @@ import {
   createClippingMaskFromSelection,
   isCombinableVectorLayer,
 } from './utils/booleanOps';
+import { ClientSharePayload, parseClientShareFromSearch } from './utils/clientShare';
 import { parseUploadedSvgToLayer } from './utils/svgExport';
+import {
+  buildDocumentFromTemplate,
+  ProTemplateSpec,
+} from './utils/templateLibrary';
 import { convertTextLayerToPath } from './utils/textToPath';
 
 const BRAND_KITS_KEY = 'forma-logo-brand-kits-v1';
@@ -120,13 +142,43 @@ export default function App() {
 
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [exportOpen, setExportOpen] = useState<boolean>(false);
+  const [shareOpen, setShareOpen] = useState<boolean>(false);
   const [wizardOpen, setWizardOpen] = useState<boolean>(false);
   const [variationsOpen, setVariationsOpen] = useState<boolean>(false);
+  const [templateGalleryOpen, setTemplateGalleryOpen] = useState<boolean>(false);
+  const [updateLogOpen, setUpdateLogOpen] = useState<boolean>(false);
+  const [clientPreviewSession, setClientPreviewSession] = useState<{
+    payload: ClientSharePayload;
+    token: string;
+    fromStudio: boolean;
+  } | null>(null);
   const [generatedVariations, setGeneratedVariations] = useState<LogoVariationEntry[]>([]);
   const [recolorStep, setRecolorStep] = useState<number>(0);
   const [incomingLogoNonce, setIncomingLogoNonce] = useState<number>(0);
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+
+  // Detect standalone ?client=... share link on startup
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.location.search) return;
+    let active = true;
+    void parseClientShareFromSearch(window.location.search).then((res) => {
+      if (!active || !res) return;
+      setBrief(res.payload.brief);
+      setHistory({ past: [], present: res.payload.doc, future: [] });
+      setPages([res.payload.doc]);
+      setActivePageIndex(0);
+      setClientPreviewSession({
+        payload: res.payload,
+        token: res.token,
+        fromStudio: false,
+      });
+      setViewMode('client-preview');
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const [savedKits, setSavedKits] = useState<SavedBrandKit[]>(() => {
     try {
@@ -156,6 +208,30 @@ export default function App() {
     () => projects.find((p) => p.id === activeProjectId) ?? null,
     [projects, activeProjectId]
   );
+
+  const [titleDraft, setTitleDraft] = useState<string>(
+    () => activeDoc.title || activeProject?.name || 'Untitled Brand'
+  );
+
+  useEffect(() => {
+    setTitleDraft(activeDoc.title || activeProject?.name || 'Untitled Brand');
+  }, [activeDoc.id, activeDoc.title, activeProject?.name]);
+
+  const commitHeaderProjectTitle = () => {
+    const trimmed = titleDraft.trim();
+    if (!trimmed) {
+      setTitleDraft(activeDoc.title || activeProject?.name || 'Untitled Brand');
+      return;
+    }
+    if (trimmed === activeDoc.title) return;
+    setHistory((prev) => ({
+      ...prev,
+      present: { ...prev.present, title: trimmed },
+    }));
+    if (activeProjectId) {
+      handleRenameProject(activeProjectId, trimmed);
+    }
+  };
 
   // Memoize active font signature so pointer drags don't re-run font loading
   const activeFontSignature = useMemo(
@@ -653,6 +729,22 @@ export default function App() {
     setSelectedLayerIds([layer.id]);
   };
 
+  const handleInsertMonogram = (layers: LogoLayer[], mode: 'add' | 'replace') => {
+    const cxOffset = activeDoc.width / 2 - 400;
+    const cyOffset = activeDoc.height / 2 - 300;
+    const stamped = layers.map((layer) => ({
+      ...layer,
+      id: nextLayerId(layer.type === 'text' ? 'mtxt' : layer.type === 'shape' ? 'mshp' : 'msvg'),
+      x: Math.round(layer.x + cxOffset),
+      y: Math.round(layer.y + cyOffset),
+    }));
+
+    const nextLayers = mode === 'replace' ? stamped : [...activeDoc.layers, ...stamped];
+    commitDocument({ ...activeDoc, layers: nextLayers });
+    setSelectedLayerIds(stamped.map((l) => l.id));
+    setViewMode('editor');
+  };
+
   const handleApplyFontPairing = (pairing: FontPairing) => {
     const pFont = resolveFont(pairing.primaryFontId);
     const sFont = resolveFont(pairing.secondaryFontId);
@@ -838,6 +930,142 @@ export default function App() {
     const [item] = next.splice(idx, 1);
     next.splice(targetIdx, 0, item);
     commitDocument({ ...activeDoc, layers: next });
+  };
+
+  const handleReorderLayerToIndex = (layerId: string, targetIndex: number) => {
+    const fromIdx = activeDoc.layers.findIndex((l) => l.id === layerId);
+    if (fromIdx === -1) return;
+    const bounded = Math.max(0, Math.min(activeDoc.layers.length - 1, targetIndex));
+    if (bounded === fromIdx) return;
+    const next = [...activeDoc.layers];
+    const [item] = next.splice(fromIdx, 1);
+    next.splice(bounded, 0, item);
+    commitDocument({ ...activeDoc, layers: next });
+  };
+
+  const handleRenameLayer = (layerId: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
+    commitDocument({
+      ...activeDoc,
+      layers: activeDoc.layers.map((l) => (l.id === layerId ? { ...l, name: trimmed } : l)),
+    });
+  };
+
+  const handleGroupSelected = () => {
+    const groupTargets = activeDoc.layers.filter(
+      (l) => selectedLayerIds.includes(l.id) && l.visible
+    );
+    if (groupTargets.length < 2) return;
+    const existingGroups = activeDoc.groups ?? [];
+    const newGroupId = nextLayerId('grp');
+    const targetSet = new Set(groupTargets.map((l) => l.id));
+
+    const updatedLayers = activeDoc.layers.map((l) =>
+      targetSet.has(l.id) ? { ...l, groupId: newGroupId } : l
+    );
+    const activeGroupIds = new Set(
+      updatedLayers.map((l) => l.groupId).filter((g): g is string => Boolean(g))
+    );
+    const prunedGroups = existingGroups.filter((g) => activeGroupIds.has(g.id));
+    const nextGroup = {
+      id: newGroupId,
+      name: `Group ${prunedGroups.length + 1}`,
+      collapsed: false,
+    };
+
+    commitDocument({
+      ...activeDoc,
+      groups: [...prunedGroups, nextGroup],
+      layers: updatedLayers,
+    });
+  };
+
+  const handleUngroupSelected = (explicitGroupId?: string) => {
+    const targetGroupIds = new Set<string>();
+    if (explicitGroupId) {
+      targetGroupIds.add(explicitGroupId);
+    } else {
+      activeDoc.layers.forEach((l) => {
+        if (selectedLayerIds.includes(l.id) && l.groupId) {
+          targetGroupIds.add(l.groupId);
+        }
+      });
+    }
+    if (targetGroupIds.size === 0) return;
+
+    const updatedLayers = activeDoc.layers.map((l) =>
+      l.groupId && targetGroupIds.has(l.groupId) ? { ...l, groupId: undefined } : l
+    );
+    const remainingGroups = (activeDoc.groups ?? []).filter(
+      (g) => !targetGroupIds.has(g.id)
+    );
+    commitDocument({
+      ...activeDoc,
+      groups: remainingGroups,
+      layers: updatedLayers,
+    });
+  };
+
+  const handleRenameGroup = (groupId: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
+    const existing = activeDoc.groups ?? [];
+    const exists = existing.some((g) => g.id === groupId);
+    const nextGroups = exists
+      ? existing.map((g) => (g.id === groupId ? { ...g, name: trimmed } : g))
+      : [...existing, { id: groupId, name: trimmed, collapsed: false }];
+    commitDocument({ ...activeDoc, groups: nextGroups });
+  };
+
+  const handleToggleGroupCollapsed = (groupId: string) => {
+    const existing = activeDoc.groups ?? [];
+    const exists = existing.some((g) => g.id === groupId);
+    const nextGroups = exists
+      ? existing.map((g) => (g.id === groupId ? { ...g, collapsed: !g.collapsed } : g))
+      : [...existing, { id: groupId, name: 'Group', collapsed: true }];
+    commitDocument({ ...activeDoc, groups: nextGroups });
+  };
+
+  const handleToggleGroupVisible = (groupId: string) => {
+    const children = activeDoc.layers.filter((l) => l.groupId === groupId);
+    if (children.length === 0) return;
+    const allHidden = children.every((l) => !l.visible);
+    commitDocument({
+      ...activeDoc,
+      layers: activeDoc.layers.map((l) =>
+        l.groupId === groupId ? { ...l, visible: allHidden } : l
+      ),
+    });
+  };
+
+  const handleToggleGroupLock = (groupId: string) => {
+    const children = activeDoc.layers.filter((l) => l.groupId === groupId);
+    if (children.length === 0) return;
+    const allLocked = children.every((l) => l.locked);
+    commitDocument({
+      ...activeDoc,
+      layers: activeDoc.layers.map((l) =>
+        l.groupId === groupId ? { ...l, locked: !allLocked } : l
+      ),
+    });
+  };
+
+  const handleToggleBackgroundLock = () => {
+    commitDocument({
+      ...activeDoc,
+      backgroundLocked: !activeDoc.backgroundLocked,
+    });
+  };
+
+  const handleSelectProTemplate = (spec: ProTemplateSpec, applyCustomBrand: boolean) => {
+    const tplDoc = buildDocumentFromTemplate(spec, {
+      customBrandName: applyCustomBrand ? brief.businessName : undefined,
+      customTagline: applyCustomBrand ? brief.tagline : undefined,
+    });
+    commitDocument(tplDoc);
+    setSelectedLayerIds(tplDoc.layers[0] ? [tplDoc.layers[0].id] : []);
+    setViewMode('editor');
   };
 
   const handleDuplicateLayer = (id: string) => {
@@ -1275,7 +1503,22 @@ export default function App() {
       onJumpToLogoEditor={() => setViewMode('editor')}
       onUpdateCanvasBrandMeta={handleUpdateCanvasBrandMeta}
     >
-      {viewMode === 'landing' ? (
+      {viewMode === 'client-preview' && clientPreviewSession ? (
+        <ClientPreviewView
+          payload={clientPreviewSession.payload}
+          shareToken={clientPreviewSession.token}
+          isFromStudioSession={clientPreviewSession.fromStudio}
+          onExitPreview={() => {
+            if (typeof window !== 'undefined' && window.location.search.includes('client=')) {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('client');
+              window.history.replaceState({}, '', url.toString());
+            }
+            setClientPreviewSession(null);
+            setViewMode('editor');
+          }}
+        />
+      ) : viewMode === 'landing' ? (
         <>
           <LandingView
             initialBrandName={brief.businessName === DEFAULT_BRAND_BRIEF.businessName ? '' : brief.businessName}
@@ -1284,6 +1527,7 @@ export default function App() {
             onOpenBlankEditor={() => setViewMode('editor')}
             onOpenSampleInEditor={handleOpenSampleFromLanding}
             onOpenProjects={() => setViewMode('projects')}
+            onOpenUpdateLog={() => setUpdateLogOpen(true)}
           />
           <LogoWizardModal
             isOpen={wizardOpen}
@@ -1297,66 +1541,201 @@ export default function App() {
           />
         </>
       ) : (
-        <div className="min-h-screen flex flex-col bg-[#F8FAFC] dark:bg-[#0F1117] text-slate-900 dark:text-slate-100 transition-colors">
-      {/* Sleek Studio Top Navigation Header */}
-      <header className="border-b border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822]">
-        <div className="mx-auto flex max-w-[1600px] flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-5 px-4 sm:px-5 py-2.5">
-          <div className="flex items-center justify-between gap-3 md:contents">
-            <div className="flex items-center gap-2.5 min-w-0">
+        <div className="min-h-screen flex flex-col bg-[#F1F3F6] dark:bg-[#0F1117] text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Zone 1: Top Glass Header (56px desktop) */}
+      <header className="sticky top-0 z-40 border-b border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/85 dark:bg-[#181B23]/88 backdrop-blur-md">
+        <div className="flex flex-col md:flex-row md:h-14 md:items-center md:justify-between gap-2 px-3 sm:px-4 py-2 md:py-0">
+          {/* Left: App Logo + Editable Project Title + Workspace Views */}
+          <div className="flex items-center justify-between md:justify-start gap-2.5 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
               <button
                 type="button"
                 onClick={() => setViewMode('landing')}
                 title="Return to Forma Studio Home"
-                className="font-display text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 cursor-pointer"
+                className="group inline-flex items-center gap-2 rounded-lg px-1.5 py-1 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/5 active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer"
               >
-                Forma Studio
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#6366F1,#8B5CF6)] text-white shadow-xs">
+                  <Sparkles className="h-3.5 w-3.5" />
+                </span>
+                <span className="text-sm font-bold tracking-tight">Forma</span>
               </button>
-              <span
-                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-0.5 text-[10.5px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap"
-                title="Changes auto-save locally to your browser"
-              >
-                {autoSaveState === 'saving' ? 'Saving…' : 'Saved'}
-              </span>
+
+              <span className="hidden sm:block h-4 w-px bg-[#E2E8F0] dark:bg-[#2A2F3D] shrink-0" aria-hidden="true" />
+
+              <input
+                type="text"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={commitHeaderProjectTitle}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitHeaderProjectTitle();
+                    (e.target as HTMLInputElement).blur();
+                  } else if (e.key === 'Escape') {
+                    setTitleDraft(activeDoc.title || activeProject?.name || 'Untitled Brand');
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                aria-label="Project title"
+                title="Click to rename project"
+                className="w-28 sm:w-36 md:w-40 truncate rounded-lg border border-transparent hover:border-[#E2E8F0] dark:hover:border-[#2A2F3D] focus:border-indigo-500 dark:focus:border-indigo-400 bg-transparent focus:bg-white dark:focus:bg-[#0F1117] px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none transition-colors"
+              />
             </div>
 
-            <div className="flex items-center gap-2 shrink-0 md:order-3">
+            <nav className="hidden lg:flex items-center gap-0.5 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6] dark:bg-[#0F1117] p-0.5 ml-1">
+              {(
+                [
+                  { id: 'editor', label: 'Editor' },
+                  { id: 'concepts', label: 'Concepts' },
+                  {
+                    id: 'projects',
+                    label: projects.length > 0 ? `Projects (${projects.length})` : 'Projects',
+                  },
+                  { id: 'mockups', label: 'Mockups' },
+                  { id: 'brandkit', label: 'Brand Kit' },
+                  { id: 'cards', label: 'Cards' },
+                ] as const
+              ).map((item) => {
+                const active = viewMode === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setViewMode(item.id)}
+                    className={`rounded-md px-2.5 py-1 text-[11.5px] font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer active:scale-95 ${
+                      active
+                        ? 'bg-white dark:bg-[#181B23] text-indigo-600 dark:text-indigo-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Center: Undo / Redo & Save Status Badge */}
+          <div className="hidden md:flex items-center gap-1.5 shrink-0">
+            <div className="inline-flex items-center gap-0.5 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117]/80 p-0.5">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={history.past.length === 0}
+                title="Undo (Ctrl/Cmd+Z)"
+                aria-label="Undo"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-[#181B23] disabled:opacity-35 active:scale-95 transition-all cursor-pointer"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={history.future.length === 0}
+                title="Redo (Ctrl/Cmd+Shift+Z)"
+                aria-label="Redo"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-[#181B23] disabled:opacity-35 active:scale-95 transition-all cursor-pointer"
+              >
+                <Redo2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <span
+              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap"
+              title="All edits auto-save locally"
+            >
+              {autoSaveState === 'saving' ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                  <span>Saving…</span>
+                </>
+              ) : (
+                <>
+                  <Check className="h-3 w-3 text-emerald-500" />
+                  <span>Saved</span>
+                </>
+              )}
+            </span>
+          </div>
+
+          {/* Right: Quick Utilities, Theme Toggle, Share & Gradient Export CTA */}
+          <div className="flex items-center justify-between md:justify-end gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setTemplateGalleryOpen(true)}
+                title="Browse 49+ Categorized Pro Templates"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400/70 dark:hover:border-indigo-500/60 dark:hover:shadow-[0_0_12px_rgba(99,102,241,0.2)] active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <LayoutTemplate className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+                <span className="hidden xl:inline">Templates</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUpdateLogOpen(true)}
+                title="Build Changelog & Update Log"
+                aria-label="Update Log"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] text-slate-700 dark:text-slate-200 hover:border-indigo-400/70 dark:hover:border-indigo-500/60 active:scale-95 transition-all shrink-0 cursor-pointer"
+              >
+                <History className="h-3.5 w-3.5" />
+              </button>
+
               <button
                 type="button"
                 onClick={() => setStudioTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-                title={studioTheme === 'light' ? 'Switch to Dark Studio Theme' : 'Switch to Light Studio Theme'}
+                title={
+                  studioTheme === 'light'
+                    ? 'Switch to Adobe Sleek Dark Theme'
+                    : 'Switch to Canva Clean Light Theme'
+                }
                 aria-label="Toggle Light/Dark Studio Theme"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] text-slate-700 dark:text-slate-200 hover:border-slate-400 dark:hover:border-slate-500 shadow-xs transition-colors cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] text-slate-700 dark:text-slate-200 hover:border-indigo-400/70 dark:hover:border-indigo-500/60 dark:hover:shadow-[0_0_12px_rgba(99,102,241,0.2)] active:scale-95 transition-all shrink-0 cursor-pointer"
               >
                 {studioTheme === 'light' ? (
-                  <Moon className="h-4 w-4" />
+                  <Moon className="h-3.5 w-3.5 text-indigo-600" />
                 ) : (
-                  <Sun className="h-4 w-4 text-amber-400" />
+                  <Sun className="h-3.5 w-3.5 text-amber-400" />
                 )}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                title="Share Read-Only Client Presentation Link"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400/70 dark:hover:border-indigo-500/60 dark:hover:shadow-[0_0_12px_rgba(99,102,241,0.2)] active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Share2 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+                <span className="hidden sm:inline">Share</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setExportOpen(true)}
-                className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#1B4332] via-[#245942] to-[#2D6A4F] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:brightness-110 transition-all whitespace-nowrap shrink-0 cursor-pointer"
+                title="Export SVG, PNG, PDF Brand Book & Favicons"
+                className="studio-gradient-btn inline-flex h-8 items-center gap-1.5 rounded-full px-4 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5" />
-                Export Logo
+                <span>Export</span>
               </button>
             </div>
           </div>
 
-          <nav className="flex items-center gap-4 sm:gap-5 lg:gap-6 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 overflow-x-auto pb-0.5 md:pb-0 md:order-2">
+          {/* Mobile/Tablet Horizontal View Switcher */}
+          <nav className="flex lg:hidden items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400 overflow-x-auto pb-0.5">
             {(
               [
-                { id: 'editor', label: 'Canvas Editor' },
-                { id: 'concepts', label: 'Logo Generator' },
+                { id: 'editor', label: 'Editor' },
+                { id: 'concepts', label: 'Concepts' },
                 {
                   id: 'projects',
-                  label: projects.length > 0 ? `My Projects (${projects.length})` : 'My Projects',
+                  label: projects.length > 0 ? `Projects (${projects.length})` : 'Projects',
                 },
-                { id: 'mockups', label: 'Preview Mockups' },
+                { id: 'mockups', label: 'Mockups' },
                 { id: 'brandkit', label: 'Brand Kit' },
-                { id: 'cards', label: 'Visiting Cards DB' },
+                { id: 'cards', label: 'Cards' },
               ] as const
             ).map((item) => {
               const active = viewMode === item.id;
@@ -1365,10 +1744,10 @@ export default function App() {
                   key={item.id}
                   type="button"
                   onClick={() => setViewMode(item.id)}
-                  className={`border-b-2 py-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`rounded-lg px-2.5 py-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
-                      ? 'border-[#1B4332] dark:border-emerald-400 font-semibold text-slate-900 dark:text-white'
-                      : 'border-transparent hover:text-slate-900 dark:hover:text-slate-200'
+                      ? 'bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'
+                      : 'hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
                 >
                   {item.label}
@@ -1384,6 +1763,7 @@ export default function App() {
         <main className="flex flex-1 flex-col lg:flex-row min-h-0 overflow-hidden">
           <EditorLeftSidebar
             doc={activeDoc}
+            brandName={brief.businessName}
             activePalette={activePalette}
             activeStyle={brief.style}
             selectedLayerIds={selectedLayerIds}
@@ -1395,11 +1775,16 @@ export default function App() {
             onUploadCustomSvg={handleUploadCustomSvg}
             onInsertTracedSymbol={handleInsertTracedSymbol}
             onAddText={handleAddText}
+            onUpdateLayer={handleUpdateLayer}
+            onInsertMonogram={handleInsertMonogram}
+            onConvertTextToPath={handleConvertTextToPath}
             onApplyFontPairing={handleApplyFontPairing}
             onApplyFontToSelectedOrPrimary={handleApplyFontToSelectedOrPrimary}
             onApplyPalette={handleApplyPalette}
             onMagicRecolor={handleMagicRecolor}
             onOpenVariations={handleOpenVariations}
+            onSelectProTemplate={handleSelectProTemplate}
+            onOpenTemplateGallery={() => setTemplateGalleryOpen(true)}
             onSwitchLayout={handleSwitchLayout}
             onSwitchStyle={handleSwitchStyle}
             onToggleLayerVisible={handleToggleLayerVisible}
@@ -1427,9 +1812,10 @@ export default function App() {
               onApplyFontPairing={handleApplyFontPairing}
               onReorderLayer={handleReorderLayer}
               onConvertTextToPath={handleConvertTextToPath}
-              onUpdateDocBackground={(backgroundColor, transparentBackground) =>
-                commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
-              }
+              onUpdateDocBackground={(backgroundColor, transparentBackground) => {
+                if (activeDoc.backgroundLocked) return;
+                commitDocument({ ...activeDoc, backgroundColor, transparentBackground });
+              }}
               onResizeArtboard={handleResizeArtboard}
               canUndo={history.past.length > 0}
               canRedo={history.future.length > 0}
@@ -1447,6 +1833,9 @@ export default function App() {
               onMagicRecolor={handleMagicRecolor}
               onOpenVariations={handleOpenVariations}
               onFixTextContrast={handleFixTextContrast}
+              onGroupSelected={handleGroupSelected}
+              onUngroupSelected={() => handleUngroupSelected()}
+              onToggleBackgroundLock={handleToggleBackgroundLock}
               activeProjectName={activeProject?.name ?? null}
               autoSaveState={autoSaveState}
               pages={pages.map((p, idx) => ({
@@ -1457,8 +1846,32 @@ export default function App() {
               onSwitchPage={handleSwitchPage}
               onAddPage={handleAddPage}
               onRemovePage={handleRemovePage}
+              onOpenMockups={() => setViewMode('mockups')}
             />
           </div>
+
+          <RightLayersDrawer
+            doc={activeDoc}
+            selectedLayerIds={selectedLayerIds}
+            onSelectLayers={setSelectedLayerIds}
+            onReorderLayerToIndex={handleReorderLayerToIndex}
+            onRenameLayer={handleRenameLayer}
+            onGroupSelected={handleGroupSelected}
+            onUngroupSelected={handleUngroupSelected}
+            onRenameGroup={handleRenameGroup}
+            onToggleGroupCollapsed={handleToggleGroupCollapsed}
+            onToggleGroupVisible={handleToggleGroupVisible}
+            onToggleGroupLock={handleToggleGroupLock}
+            onToggleLayerVisible={handleToggleLayerVisible}
+            onToggleLayerLock={handleToggleLayerLock}
+            onDuplicateLayer={handleDuplicateLayer}
+            onDeleteLayer={handleDeleteLayer}
+            onToggleBackgroundLock={handleToggleBackgroundLock}
+            onUpdateDocBackground={(backgroundColor, transparentBackground) => {
+              if (activeDoc.backgroundLocked) return;
+              commitDocument({ ...activeDoc, backgroundColor, transparentBackground });
+            }}
+          />
         </main>
       )}
 
@@ -1504,6 +1917,7 @@ export default function App() {
             palette={activePalette}
             onBackToEditor={() => setViewMode('editor')}
             onOpenBrandKit={() => setViewMode('brandkit')}
+            onOpenShare={() => setShareOpen(true)}
           />
         </main>
       )}
@@ -1552,6 +1966,19 @@ export default function App() {
         palette={activePalette}
         planTier={planTier}
         onChangePlanTier={setPlanTier}
+        onOpenShareModal={() => setShareOpen(true)}
+      />
+
+      <ShareClientModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        doc={activeDoc}
+        brief={brief}
+        palette={activePalette}
+        onOpenClientPreview={(payload, token) => {
+          setClientPreviewSession({ payload, token, fromStudio: true });
+          setViewMode('client-preview');
+        }}
       />
 
       <VariationsModal
@@ -1568,6 +1995,19 @@ export default function App() {
       />
         </div>
       )}
+
+      <TemplateLibraryModal
+        isOpen={templateGalleryOpen}
+        onClose={() => setTemplateGalleryOpen(false)}
+        brandName={brief.businessName}
+        tagline={brief.tagline}
+        onSelectTemplate={handleSelectProTemplate}
+      />
+
+      <UpdateLogModal
+        isOpen={updateLogOpen}
+        onClose={() => setUpdateLogOpen(false)}
+      />
     </StudioLogoProvider>
   );
 }

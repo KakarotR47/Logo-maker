@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  BookOpen,
   Check,
   Crown,
   Download,
@@ -14,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { BrandBrief, ColorPalette, LogoDocument } from '../types/logo';
+import { exportBrandGuidelinesPdf } from '../utils/brandBookPdf';
 import {
   CheckoutProvider,
   getConfiguredCheckoutUrl,
@@ -42,6 +44,7 @@ interface ExportModalProps {
   palette: ColorPalette;
   planTier?: PlanTier;
   onChangePlanTier?: (tier: PlanTier) => void;
+  onOpenShareModal?: () => void;
 }
 
 type PreviewTab = 'master' | 'avatar' | 'banner';
@@ -67,6 +70,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   palette,
   planTier: controlledPlanTier,
   onChangePlanTier,
+  onOpenShareModal,
 }) => {
   const [internalPlanTier, setInternalPlanTier] = useState<PlanTier>('pro');
   const planTier = controlledPlanTier ?? internalPlanTier;
@@ -771,6 +775,66 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </>
                 )}
               </button>
+            </div>
+
+            {/* Automated 6-Page Brand Guidelines Book & Client Presentation Card */}
+            <div className="rounded-2xl border border-[#DCD9D0] bg-[#FAF9F6] p-4 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-[#141413]">
+                      Automated Brand Guidelines Book &amp; Client Presentation
+                    </h3>
+                    <span className="rounded bg-[#1B4332]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#1B4332]">
+                      6-Page PDF
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-[#5C5951]">
+                    Auto-generates Cover, Primary Logo &amp; Lockups, 1x Clear Space &amp; Min Size, HEX/RGB/CMYK Palette, Typography Hierarchy, and Visual Do’s &amp; Don’ts.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={busyKey !== null}
+                  onClick={() =>
+                    void runExport('brandbook', async () => {
+                      await exportBrandGuidelinesPdf(doc, palette, brief);
+                      return '6-page Brand Guidelines Presentation PDF downloaded.';
+                    })
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1B4332] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#143326] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {busyKey === 'brandbook' ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Building 6-Page Book...
+                    </>
+                  ) : (
+                    <>
+                      <BookOpen className="h-3.5 w-3.5" />
+                      Download Brand Guidelines PDF
+                    </>
+                  )}
+                </button>
+
+                {onOpenShareModal && (
+                  <button
+                    type="button"
+                    disabled={busyKey !== null}
+                    onClick={() => {
+                      onClose();
+                      onOpenShareModal();
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#DCD9D0] bg-white px-4 py-2.5 text-xs font-semibold text-[#141413] hover:border-[#141413] transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Share2 className="h-3.5 w-3.5 text-[#1B4332]" />
+                    Share Client Preview Link
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Individual Quick Downloads */}

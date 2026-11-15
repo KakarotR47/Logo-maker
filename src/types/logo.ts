@@ -196,6 +196,7 @@ export interface LayerBase {
   opacity: number;
   visible: boolean;
   locked: boolean;
+  groupId?: string;
   fill: string;
   fillGradient?: LayerGradient;
   fillPattern?: LayerPatternFill;
@@ -225,6 +226,39 @@ export interface DividerLayer extends LayerBase {
   dividerKind: DividerKind;
 }
 
+export type TextEffectStyleKind =
+  | 'none'
+  | 'hollow'
+  | 'splice'
+  | 'neon'
+  | 'extrude'
+  | 'glitch'
+  | 'foil';
+
+export interface TextEffectConfig {
+  style: TextEffectStyleKind;
+  intensity?: number; // 0.3..2.0
+  primaryColor?: string;
+  secondaryColor?: string;
+  offset?: number; // px offset for splice / extrude / glitch
+  angle?: number; // 0..360 deg direction for splice / extrude
+}
+
+export type TextWarpMode =
+  | 'none'
+  | 'arc-up'
+  | 'arc-down'
+  | 'circle'
+  | 'wave'
+  | 'slant';
+
+export interface TextWarpConfig {
+  mode: TextWarpMode;
+  strength: number; // 0..100 bend/wave depth
+  slant: number; // -35..35 deg horizontal slant
+  perspective?: number; // -30..30 deg vertical tilt / perspective skew
+}
+
 export interface TextLayer extends LayerBase {
   type: 'text';
   text: string;
@@ -239,6 +273,8 @@ export interface TextLayer extends LayerBase {
   uppercase: boolean;
   /** 0 = flat straight text; +20..+240 = convex upward arch; -20..-240 = concave smile arc */
   curveRadius: number;
+  textEffect?: TextEffectConfig;
+  textWarp?: TextWarpConfig;
 }
 
 export interface PathLayer extends LayerBase {
@@ -275,6 +311,12 @@ export type LogoLayer =
   | PathLayer
   | CustomSvgLayer;
 
+export interface LayerGroup {
+  id: string;
+  name: string;
+  collapsed?: boolean;
+}
+
 export interface LogoDocument {
   id: string;
   title: string;
@@ -282,6 +324,8 @@ export interface LogoDocument {
   height: number;
   backgroundColor: string;
   transparentBackground: boolean;
+  backgroundLocked?: boolean;
+  groups?: LayerGroup[];
   layers: LogoLayer[];
 }
 
@@ -321,4 +365,5 @@ export type StudioViewMode =
   | 'mockups'
   | 'brandkit'
   | 'projects'
-  | 'cards';
+  | 'cards'
+  | 'client-preview';

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Layers, Palette } from 'lucide-react';
+import { ArrowLeft, Layers, Palette, Share2 } from 'lucide-react';
 import { BrandBrief, ColorPalette, LogoDocument } from '../types/logo';
 import { extractBrandVariants } from '../utils/logoGenerator';
 import { LogoDocumentSvg } from './CanvasLayerRenderer';
@@ -10,6 +10,7 @@ interface MockupPreviewViewProps {
   palette: ColorPalette;
   onBackToEditor: () => void;
   onOpenBrandKit: () => void;
+  onOpenShare?: () => void;
 }
 
 type MockupTone = 'auto' | 'dark' | 'mono';
@@ -28,6 +29,7 @@ export const MockupPreviewView: React.FC<MockupPreviewViewProps> = ({
   palette,
   onBackToEditor,
   onOpenBrandKit,
+  onOpenShare,
 }) => {
   const [mockupTone, setMockupTone] = useState<MockupTone>('auto');
   const [cardStock, setCardStock] = useState<'ivory' | 'charcoal' | 'brand'>('ivory');
@@ -110,6 +112,17 @@ export const MockupPreviewView: React.FC<MockupPreviewViewProps> = ({
             <Palette className="h-3.5 w-3.5" />
             Brand Kit
           </button>
+
+          {onOpenShare && (
+            <button
+              type="button"
+              onClick={onOpenShare}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#1B4332]/30 bg-[#1B4332]/8 px-3.5 py-2 text-xs font-semibold text-[#1B4332] hover:bg-[#1B4332]/15 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              Share Client Link
+            </button>
+          )}
 
           <button
             type="button"

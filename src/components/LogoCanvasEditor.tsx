@@ -3,12 +3,15 @@ import {
   AlertTriangle,
   BookmarkCheck,
   CheckCircle2,
+  Eye,
   FolderPlus,
   Grid3x3,
   Maximize2,
   Plus,
   RotateCcw,
+  Ruler,
   Scan,
+  Scissors,
   X,
   ZoomIn,
   ZoomOut,
@@ -88,6 +91,9 @@ interface LogoCanvasEditorProps {
   onMagicRecolor?: () => void;
   onOpenVariations?: () => void;
   onFixTextContrast?: (layerId: string, suggestedHex: string) => void;
+  onGroupSelected?: () => void;
+  onUngroupSelected?: () => void;
+  onToggleBackgroundLock?: () => void;
   activeProjectName?: string | null;
   autoSaveState?: 'saved' | 'saving';
   pages: Array<{ id: string; title: string }>;
@@ -95,6 +101,7 @@ interface LogoCanvasEditorProps {
   onSwitchPage: (index: number) => void;
   onAddPage: () => void;
   onRemovePage: (index: number) => void;
+  onOpenMockups?: () => void;
 }
 
 export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
@@ -116,8 +123,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onConvertTextToPath,
   onUpdateDocBackground,
   onResizeArtboard,
-  canUndo,
-  canRedo,
+  canUndo: _canUndo,
+  canRedo: _canRedo,
   onUndo,
   onRedo,
   onDeleteSelected,
@@ -129,6 +136,9 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onMagicRecolor,
   onOpenVariations,
   onFixTextContrast,
+  onGroupSelected,
+  onUngroupSelected,
+  onToggleBackgroundLock,
   activeProjectName,
   autoSaveState = 'saved',
   pages,
@@ -136,17 +146,30 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onSwitchPage,
   onAddPage,
   onRemovePage,
+  onOpenMockups,
 }) => {
   const [zoom, setZoom] = useState<number>(1);
-  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [gridMode, setGridMode] = useState<'off' | 'square' | 'thirds' | 'golden'>('square');
+  const [rulerUnit, setRulerUnit] = useState<'off' | 'px' | 'mm'>('px');
   const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
   const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
+  const [showBleed, setShowBleed] = useState<boolean>(false);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [marquee, setMarquee] = useState<MarqueeBox | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
+  const [cursorCoords, setCursorCoords] = useState<{ x: number; y: number } | null>(null);
+  const [rulerMetrics, setRulerMetrics] = useState<{
+    originX: number;
+    originY: number;
+    viewW: number;
+    viewH: number;
+  }>({ originX: 40, originY: 40, viewW: 900, viewH: 700 });
+
+  const showGrid = gridMode !== 'off';
 
   const viewportRef = useRef<HTMLDivElement>(null);
+  const artboardBoxRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const interactionRef = useRef<InteractionState | null>(null);
   const svgRectRef = useRef<DOMRect | null>(null);
@@ -172,6 +195,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     onDeleteSelected,
     onDuplicateSelected,
     onNudgeSelected,
+    onGroupSelected,
+    onUngroupSelected,
   });
   latestRef.current = {
     doc,
@@ -187,6 +212,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     onDeleteSelected,
     onDuplicateSelected,
     onNudgeSelected,
+    onGroupSelected,
+    onUngroupSelected,
   };
 
   const selectedSet = useMemo(() => new Set(selectedLayerIds), [selectedLayerIds]);
@@ -229,12 +256,17 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   );
 
   const computeFitZoom = useCallback(
-    (containerW: number) => {
-      const horizontalPad = containerW < 640 ? 28 : 72;
+    (containerW: number, containerH?: number) => {
+      const horizontalPad = containerW < 640 ? 32 : 84;
+      const verticalPad = containerH && containerH < 600 ? 120 : 156;
       const availableW = Math.max(220, containerW - horizontalPad);
-      return Math.min(1, Math.max(0.28, +(availableW / Math.max(1, doc.width)).toFixed(2)));
+      const fitW = availableW / Math.max(1, doc.width);
+      const fitH = containerH
+        ? Math.max(200, containerH - verticalPad) / Math.max(1, doc.height)
+        : 1;
+      return Math.min(1, Math.max(0.25, +Math.min(fitW, fitH).toFixed(2)));
     },
-    [doc.width]
+    [doc.width, doc.height]
   );
 
   const handleFitZoom = useCallback(() => {
@@ -244,8 +276,22 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
       setZoom(1);
       return;
     }
-    setZoom(computeFitZoom(el.clientWidth));
+    setZoom(computeFitZoom(el.clientWidth, el.clientHeight));
   }, [computeFitZoom]);
+
+  const syncRulerMetrics = useCallback(() => {
+    const vp = viewportRef.current;
+    const ab = artboardBoxRef.current;
+    if (!vp || !ab) return;
+    const vpRect = vp.getBoundingClientRect();
+    const abRect = ab.getBoundingClientRect();
+    setRulerMetrics({
+      originX: abRect.left - vpRect.left,
+      originY: abRect.top - vpRect.top,
+      viewW: vp.clientWidth,
+      viewH: vp.clientHeight,
+    });
+  }, []);
 
   // Responsive auto-fit on mobile/tablet viewports via ResizeObserver
   useEffect(() => {
@@ -253,9 +299,11 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     if (!el) return;
 
     const applyResponsiveFit = () => {
-      if (userAdjustedZoomRef.current) return;
-      const fit = computeFitZoom(el.clientWidth);
-      setZoom(fit);
+      if (!userAdjustedZoomRef.current) {
+        const fit = computeFitZoom(el.clientWidth, el.clientHeight);
+        setZoom(fit);
+      }
+      requestAnimationFrame(syncRulerMetrics);
     };
 
     applyResponsiveFit();
@@ -266,7 +314,12 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [computeFitZoom]);
+  }, [computeFitZoom, syncRulerMetrics]);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(syncRulerMetrics);
+    return () => cancelAnimationFrame(id);
+  }, [zoom, doc.width, doc.height, rulerUnit, syncRulerMetrics]);
 
   const clientToArtboard = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -609,6 +662,16 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         return;
       }
 
+      if (mod && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          cur.onUngroupSelected?.();
+        } else {
+          cur.onGroupSelected?.();
+        }
+        return;
+      }
+
       if (mod && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         cur.onSelectLayers(
@@ -652,16 +715,26 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   const startLayerDrag = (e: React.PointerEvent, layer: LogoLayer) => {
     e.stopPropagation();
 
+    // Expand click to sibling group members unless holding Alt for deep-select
+    const groupSiblingIds =
+      layer.groupId && !e.altKey
+        ? doc.layers
+            .filter((item) => item.groupId === layer.groupId && item.visible)
+            .map((item) => item.id)
+        : [layer.id];
+
     let nextIds: string[];
     if (e.shiftKey) {
-      nextIds = selectedSet.has(layer.id)
-        ? selectedLayerIds.filter((id) => id !== layer.id)
-        : [...selectedLayerIds, layer.id];
+      const siblingSet = new Set(groupSiblingIds);
+      const alreadyAllSelected = groupSiblingIds.every((id) => selectedSet.has(id));
+      nextIds = alreadyAllSelected
+        ? selectedLayerIds.filter((id) => !siblingSet.has(id))
+        : Array.from(new Set([...selectedLayerIds, ...groupSiblingIds]));
       onSelectLayers(nextIds);
     } else if (selectedSet.has(layer.id)) {
       nextIds = selectedLayerIds;
     } else {
-      nextIds = [layer.id];
+      nextIds = groupSiblingIds;
       onSelectLayers(nextIds);
     }
 
@@ -754,58 +827,277 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   const scaledW = Math.round(doc.width * zoom);
   const scaledH = Math.round(doc.height * zoom);
 
-  return (
-    <div className="flex flex-1 flex-col min-w-0 bg-[#F1F5F9] dark:bg-[#0B0D14] transition-colors">
-      {/* Floating Contextual Top Bar right above the Artboard */}
-      <div className="px-3 sm:px-5 pt-3 pb-1 shrink-0 z-30">
-        <FloatingContextToolbar
-          doc={doc}
-          activePalette={activePalette}
-          selectedLayers={selectedLayers}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onUndo={onUndo}
-          onRedo={onRedo}
-          onUpdateLayer={onUpdateLayer}
-          onAlignSelectedLayers={onAlignSelectedLayers}
-          onBatchUpdateSelected={onBatchUpdateSelected}
-          onBooleanCombine={onBooleanCombine}
-          onCreateClippingMask={onCreateClippingMask}
-          onApplyFontPairing={onApplyFontPairing}
-          onDuplicateSelected={onDuplicateSelected}
-          onDeleteSelected={onDeleteSelected}
-          onUpdateDocBackground={onUpdateDocBackground}
-          onResizeArtboard={(w, h) => {
-            userAdjustedZoomRef.current = false;
-            onResizeArtboard(w, h);
-          }}
-          onReorderLayer={onReorderLayer}
-          onConvertTextToPath={onConvertTextToPath}
-          onMagicRecolor={onMagicRecolor}
-          onOpenVariations={onOpenVariations}
-          onOpenWizard={onOpenWizard}
-          onSendToVisitingCard={onSendToVisitingCard}
-        />
-      </div>
+  const cycleGridMode = useCallback(() => {
+    setGridMode((m) =>
+      m === 'off' ? 'square' : m === 'square' ? 'thirds' : m === 'thirds' ? 'golden' : 'off'
+    );
+  }, []);
 
-      {/* Scrollable Workspace Viewport */}
-      <div
-        ref={viewportRef}
-        className="relative flex flex-1 items-center justify-center overflow-auto p-3.5 sm:p-6 lg:p-8 min-h-[280px] sm:min-h-[380px]"
-        onPointerDown={(e) => {
-          if (e.target === e.currentTarget) {
-            onSelectLayers([]);
-            setEditingTextId(null);
+  return (
+    <div className="relative flex flex-1 flex-col min-w-0 bg-[#F1F3F6] dark:bg-[#0F1117] transition-colors">
+      {/* Workspace Container with Edge Rulers + Scrollable Canvas Viewport + Floating Bars */}
+      <div className="relative flex flex-1 min-h-[320px] sm:min-h-[420px] overflow-hidden">
+        {/* Top-Left Ruler Corner Unit Toggle */}
+        {rulerUnit !== 'off' && (
+          <button
+            type="button"
+            onClick={() =>
+              setRulerUnit((u) => (u === 'px' ? 'mm' : u === 'mm' ? 'off' : 'px'))
+            }
+            title="Switch ruler units (px / mm / off)"
+            className="absolute top-0 left-0 z-20 flex h-[22px] w-[24px] items-center justify-center border-r border-b border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] font-mono-num text-[9px] font-bold uppercase text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
+          >
+            {rulerUnit}
+          </button>
+        )}
+
+        {/* Top Horizontal Ruler */}
+        {rulerUnit !== 'off' && (() => {
+          const pxPerUnit = rulerUnit === 'mm' ? 96 / 25.4 : 1;
+          const totalUnits = doc.width / pxPerUnit;
+          const stepUnits =
+            rulerUnit === 'mm'
+              ? zoom < 0.55
+                ? 50
+                : zoom < 0.9
+                  ? 20
+                  : 10
+              : zoom < 0.5
+                ? 200
+                : zoom < 0.85
+                  ? 100
+                  : 50;
+          const minorSub = 5;
+          const ticks: Array<{ px: number; label?: string; major: boolean }> = [];
+          for (let u = 0; u <= totalUnits + stepUnits; u += stepUnits / minorSub) {
+            const px = u * pxPerUnit;
+            if (px > doc.width + 0.5) break;
+            const isMajor = Math.abs(Math.round(u / stepUnits) * stepUnits - u) < 0.01;
+            ticks.push({
+              px,
+              major: isMajor,
+              label: isMajor ? `${Math.round(u)}` : undefined,
+            });
           }
-        }}
-      >
+          const cursorScreenX =
+            cursorCoords !== null ? rulerMetrics.originX + cursorCoords.x * zoom : null;
+
+          return (
+            <div
+              className="pointer-events-none absolute top-0 left-[24px] right-0 z-10 h-[22px] overflow-hidden border-b border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/90 dark:bg-[#181B23]/90 backdrop-blur-xs select-none"
+              aria-hidden="true"
+            >
+              <svg width={Math.max(100, rulerMetrics.viewW)} height={22} className="block">
+                {ticks.map((t, i) => {
+                  const sx = rulerMetrics.originX - 24 + t.px * zoom;
+                  if (sx < -20 || sx > rulerMetrics.viewW + 20) return null;
+                  return (
+                    <g key={i}>
+                      <line
+                        x1={sx}
+                        y1={t.major ? 4 : 14}
+                        x2={sx}
+                        y2={22}
+                        stroke="currentColor"
+                        className={
+                          t.major
+                            ? 'text-slate-400 dark:text-slate-500'
+                            : 'text-slate-300 dark:text-slate-700'
+                        }
+                        strokeWidth={1}
+                      />
+                      {t.label !== undefined && (
+                        <text
+                          x={sx + 3}
+                          y={11}
+                          fill="currentColor"
+                          className="text-slate-500 dark:text-slate-400"
+                          fontSize={8.5}
+                          fontFamily="'JetBrains Mono', monospace"
+                        >
+                          {t.label}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+                {cursorScreenX !== null && (
+                  <line
+                    x1={cursorScreenX - 24}
+                    y1={0}
+                    x2={cursorScreenX - 24}
+                    y2={22}
+                    stroke="#6366F1"
+                    strokeWidth={1.5}
+                  />
+                )}
+              </svg>
+            </div>
+          );
+        })()}
+
+        {/* Left Vertical Ruler */}
+        {rulerUnit !== 'off' && (() => {
+          const pxPerUnit = rulerUnit === 'mm' ? 96 / 25.4 : 1;
+          const totalUnits = doc.height / pxPerUnit;
+          const stepUnits =
+            rulerUnit === 'mm'
+              ? zoom < 0.55
+                ? 50
+                : zoom < 0.9
+                  ? 20
+                  : 10
+              : zoom < 0.5
+                ? 200
+                : zoom < 0.85
+                  ? 100
+                  : 50;
+          const minorSub = 5;
+          const ticks: Array<{ py: number; label?: string; major: boolean }> = [];
+          for (let u = 0; u <= totalUnits + stepUnits; u += stepUnits / minorSub) {
+            const py = u * pxPerUnit;
+            if (py > doc.height + 0.5) break;
+            const isMajor = Math.abs(Math.round(u / stepUnits) * stepUnits - u) < 0.01;
+            ticks.push({
+              py,
+              major: isMajor,
+              label: isMajor ? `${Math.round(u)}` : undefined,
+            });
+          }
+          const cursorScreenY =
+            cursorCoords !== null ? rulerMetrics.originY + cursorCoords.y * zoom : null;
+
+          return (
+            <div
+              className="pointer-events-none absolute top-[22px] bottom-0 left-0 z-10 w-[24px] overflow-hidden border-r border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/90 dark:bg-[#181B23]/90 backdrop-blur-xs select-none"
+              aria-hidden="true"
+            >
+              <svg width={24} height={Math.max(100, rulerMetrics.viewH)} className="block">
+                {ticks.map((t, i) => {
+                  const sy = rulerMetrics.originY - 22 + t.py * zoom;
+                  if (sy < -20 || sy > rulerMetrics.viewH + 20) return null;
+                  return (
+                    <g key={i}>
+                      <line
+                        x1={t.major ? 4 : 15}
+                        y1={sy}
+                        x2={24}
+                        y2={sy}
+                        stroke="currentColor"
+                        className={
+                          t.major
+                            ? 'text-slate-400 dark:text-slate-500'
+                            : 'text-slate-300 dark:text-slate-700'
+                        }
+                        strokeWidth={1}
+                      />
+                      {t.label !== undefined && (
+                        <text
+                          x={10}
+                          y={sy - 3}
+                          transform={`rotate(-90, 10, ${sy - 3})`}
+                          fill="currentColor"
+                          className="text-slate-500 dark:text-slate-400"
+                          fontSize={8.5}
+                          fontFamily="'JetBrains Mono', monospace"
+                        >
+                          {t.label}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+                {cursorScreenY !== null && (
+                  <line
+                    x1={0}
+                    y1={cursorScreenY - 22}
+                    x2={24}
+                    y2={cursorScreenY - 22}
+                    stroke="#6366F1"
+                    strokeWidth={1.5}
+                  />
+                )}
+              </svg>
+            </div>
+          );
+        })()}
+
+        {/* Scrollable Workspace Viewport */}
+        <div
+          ref={viewportRef}
+          onScroll={syncRulerMetrics}
+          onPointerMove={(e) => {
+            if (rulerUnit === 'off') return;
+            const rect = svgRef.current?.getBoundingClientRect();
+            if (!rect || rect.width === 0 || rect.height === 0) return;
+            const ax = ((e.clientX - rect.left) / rect.width) * doc.width;
+            const ay = ((e.clientY - rect.top) / rect.height) * doc.height;
+            setCursorCoords({ x: ax, y: ay });
+          }}
+          onPointerLeave={() => setCursorCoords(null)}
+          className={`relative flex-1 overflow-auto ${
+            rulerUnit !== 'off'
+              ? 'pt-9 pl-9 pr-4 pb-16 sm:pt-10 sm:pl-10 sm:pr-7 sm:pb-16'
+              : 'px-3.5 pt-4 pb-16 sm:px-6 lg:px-8'
+          }`}
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) {
+              onSelectLayers([]);
+              setEditingTextId(null);
+            }
+          }}
+        >
         {editorNotice && (
-          <div className="pointer-events-none absolute top-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50/95 px-3.5 py-1.5 text-xs font-semibold text-amber-900 shadow-md backdrop-blur dark:border-amber-700 dark:bg-amber-950/90 dark:text-amber-200">
+          <div className="pointer-events-none fixed top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 shadow-lg backdrop-blur">
             {editorNotice}
           </div>
         )}
+
         <div
-          className="relative shrink-0 shadow-[0_14px_42px_rgba(15,23,42,0.14)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.55)] ring-1 ring-[#E2E8F0] dark:ring-[#2A2D3D]"
+          className="flex min-h-full w-full flex-col items-center justify-center"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) {
+              onSelectLayers([]);
+              setEditingTextId(null);
+            }
+          }}
+        >
+          {/* Floating Contextual Action Bar — positioned 16px (mb-4) directly above the artboard */}
+          <div className="sticky top-1 z-30 mb-4 max-w-full">
+            <FloatingContextToolbar
+              doc={doc}
+              activePalette={activePalette}
+              selectedLayers={selectedLayers}
+              gridMode={gridMode}
+              onCycleGridMode={cycleGridMode}
+              onUpdateLayer={onUpdateLayer}
+              onAlignSelectedLayers={onAlignSelectedLayers}
+              onBatchUpdateSelected={onBatchUpdateSelected}
+              onBooleanCombine={onBooleanCombine}
+              onCreateClippingMask={onCreateClippingMask}
+              onApplyFontPairing={onApplyFontPairing}
+              onDuplicateSelected={onDuplicateSelected}
+              onDeleteSelected={onDeleteSelected}
+              onUpdateDocBackground={onUpdateDocBackground}
+              onResizeArtboard={(w, h) => {
+                userAdjustedZoomRef.current = false;
+                onResizeArtboard(w, h);
+              }}
+              onReorderLayer={onReorderLayer}
+              onConvertTextToPath={onConvertTextToPath}
+              onMagicRecolor={onMagicRecolor}
+              onOpenVariations={onOpenVariations}
+              onOpenWizard={onOpenWizard}
+              onSendToVisitingCard={onSendToVisitingCard}
+              onGroupSelected={onGroupSelected}
+              onUngroupSelected={onUngroupSelected}
+              onToggleBackgroundLock={onToggleBackgroundLock}
+            />
+          </div>
+
+        <div
+          ref={artboardBoxRef}
+          className="relative shrink-0 shadow-[0_14px_42px_rgba(15,23,42,0.14)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.58)] ring-1 ring-[#E2E8F0] dark:ring-[#2A2F3D]"
           style={{
             width: scaledW,
             height: scaledH,
@@ -843,7 +1135,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               />
             )}
 
-            {showGrid && (
+            {gridMode === 'square' && (
               <g pointerEvents="none" opacity={0.42}>
                 <defs>
                   <pattern id="editor-grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -855,6 +1147,164 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 <line x1={0} y1={doc.height / 2} x2={doc.width} y2={doc.height / 2} stroke="#9CA3AF" strokeWidth="0.7" strokeDasharray="4 4" opacity={0.45} />
               </g>
             )}
+
+            {gridMode === 'thirds' && (() => {
+              const x1 = doc.width / 3;
+              const x2 = (doc.width * 2) / 3;
+              const y1 = doc.height / 3;
+              const y2 = (doc.height * 2) / 3;
+              const pts = [
+                [x1, y1],
+                [x2, y1],
+                [x1, y2],
+                [x2, y2],
+              ];
+              return (
+                <g pointerEvents="none">
+                  {[x1, x2].map((vx, i) => (
+                    <line
+                      key={`tv-${i}`}
+                      x1={vx}
+                      y1={0}
+                      x2={vx}
+                      y2={doc.height}
+                      stroke="#0284C7"
+                      strokeWidth={1.1 / zoom}
+                      strokeDasharray="5 4"
+                      opacity={0.55}
+                    />
+                  ))}
+                  {[y1, y2].map((hy, i) => (
+                    <line
+                      key={`th-${i}`}
+                      x1={0}
+                      y1={hy}
+                      x2={doc.width}
+                      y2={hy}
+                      stroke="#0284C7"
+                      strokeWidth={1.1 / zoom}
+                      strokeDasharray="5 4"
+                      opacity={0.55}
+                    />
+                  ))}
+                  {pts.map(([px, py], i) => (
+                    <circle
+                      key={`tp-${i}`}
+                      cx={px}
+                      cy={py}
+                      r={5 / zoom}
+                      fill="none"
+                      stroke="#0284C7"
+                      strokeWidth={1.5 / zoom}
+                      opacity={0.75}
+                    />
+                  ))}
+                </g>
+              );
+            })()}
+
+            {gridMode === 'golden' && (() => {
+              const phiMinor = 0.381966;
+              const phiMajor = 0.618034;
+              const gx1 = doc.width * phiMinor;
+              const gx2 = doc.width * phiMajor;
+              const gy1 = doc.height * phiMinor;
+              const gy2 = doc.height * phiMajor;
+              const cx = doc.width / 2;
+              const cy = doc.height / 2;
+              const coreR = Math.min(doc.width, doc.height) * 0.236;
+              return (
+                <g pointerEvents="none">
+                  {[gx1, gx2].map((vx, i) => (
+                    <line
+                      key={`gv-${i}`}
+                      x1={vx}
+                      y1={0}
+                      x2={vx}
+                      y2={doc.height}
+                      stroke="#D97706"
+                      strokeWidth={1.15 / zoom}
+                      strokeDasharray="6 3"
+                      opacity={0.62}
+                    />
+                  ))}
+                  {[gy1, gy2].map((hy, i) => (
+                    <line
+                      key={`gh-${i}`}
+                      x1={0}
+                      y1={hy}
+                      x2={doc.width}
+                      y2={hy}
+                      stroke="#D97706"
+                      strokeWidth={1.15 / zoom}
+                      strokeDasharray="6 3"
+                      opacity={0.62}
+                    />
+                  ))}
+                  {/* Central Golden Circle & Diagonal Construction Lines */}
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={coreR}
+                    fill="none"
+                    stroke="#D97706"
+                    strokeWidth={1 / zoom}
+                    strokeDasharray="3 3"
+                    opacity={0.5}
+                  />
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={coreR * 1.618}
+                    fill="none"
+                    stroke="#D97706"
+                    strokeWidth={1 / zoom}
+                    strokeDasharray="5 4"
+                    opacity={0.42}
+                  />
+                  <line
+                    x1={0}
+                    y1={0}
+                    x2={doc.width}
+                    y2={doc.height}
+                    stroke="#D97706"
+                    strokeWidth={0.8 / zoom}
+                    opacity={0.28}
+                  />
+                  <line
+                    x1={doc.width}
+                    y1={0}
+                    x2={0}
+                    y2={doc.height}
+                    stroke="#D97706"
+                    strokeWidth={0.8 / zoom}
+                    opacity={0.28}
+                  />
+                  <text
+                    x={gx1 + 6}
+                    y={18}
+                    fill="#D97706"
+                    fontSize={10}
+                    fontWeight={700}
+                    fontFamily="'JetBrains Mono', monospace"
+                    opacity={0.85}
+                  >
+                    φ 0.382
+                  </text>
+                  <text
+                    x={gx2 + 6}
+                    y={18}
+                    fill="#D97706"
+                    fontSize={10}
+                    fontWeight={700}
+                    fontFamily="'JetBrains Mono', monospace"
+                    opacity={0.85}
+                  >
+                    φ 0.618
+                  </text>
+                </g>
+              );
+            })()}
 
             {/* Render All Scene Layers */}
             {doc.layers.map((layer) => (
@@ -877,7 +1327,63 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               </g>
             ))}
 
-            {/* Toggleable Safe-Zone & Bleed Margin Overlay */}
+            {/* Print Bleed Overlay (3mm ≈ 12px Trim Frame & Crop Marks) */}
+            {showBleed && (() => {
+              const bleed = 12; // ~3.175mm at 96dpi
+              const bw = doc.width - bleed * 2;
+              const bh = doc.height - bleed * 2;
+              const mark = 16;
+              return (
+                <g pointerEvents="none">
+                  <path
+                    d={`M 0 0 H ${doc.width} V ${doc.height} H 0 Z M ${bleed} ${bleed} V ${bleed + bh} H ${bleed + bw} V ${bleed} Z`}
+                    fill="#E11D48"
+                    fillOpacity={0.08}
+                    fillRule="evenodd"
+                  />
+                  <rect
+                    x={bleed}
+                    y={bleed}
+                    width={bw}
+                    height={bh}
+                    fill="none"
+                    stroke="#E11D48"
+                    strokeWidth={1.4 / zoom}
+                    strokeDasharray="5 3"
+                  />
+                  <path
+                    d={`M ${bleed} 0 V ${mark} M 0 ${bleed} H ${mark}
+                        M ${bleed + bw} 0 V ${mark} M ${doc.width} ${bleed} H ${doc.width - mark}
+                        M ${bleed} ${doc.height} V ${doc.height - mark} M 0 ${bleed + bh} H ${mark}
+                        M ${bleed + bw} ${doc.height} V ${doc.height - mark} M ${doc.width} ${bleed + bh} H ${doc.width - mark}`}
+                    fill="none"
+                    stroke="#E11D48"
+                    strokeWidth={1.5 / zoom}
+                  />
+                  <rect
+                    x={bleed + 8}
+                    y={bleed + 6}
+                    width={138}
+                    height={20}
+                    rx={4}
+                    fill="#E11D48"
+                    fillOpacity={0.92}
+                  />
+                  <text
+                    x={bleed + 15}
+                    y={bleed + 19}
+                    fill="#FFFFFF"
+                    fontSize={9.5}
+                    fontWeight={700}
+                    fontFamily="'JetBrains Mono', monospace"
+                  >
+                    BLEED TRIM · 3MM (12PX)
+                  </text>
+                </g>
+              );
+            })()}
+
+            {/* Toggleable Safe-Zone Margin Overlay */}
             {showSafeZone && safeZoneReport && (() => {
               const mx = safeZoneReport.marginX;
               const my = safeZoneReport.marginY;
@@ -979,8 +1485,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 y={Math.min(marquee.startY, marquee.endY)}
                 width={Math.abs(marquee.endX - marquee.startX)}
                 height={Math.abs(marquee.endY - marquee.startY)}
-                fill="rgba(37, 99, 235, 0.1)"
-                stroke="#2563EB"
+                fill="rgba(99, 102, 241, 0.12)"
+                stroke="#6366F1"
                 strokeWidth={1.2 / zoom}
                 strokeDasharray="4 2"
                 pointerEvents="none"
@@ -1002,7 +1508,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                       : undefined
                   }
                   fill="none"
-                  stroke="#2563EB"
+                  stroke="#6366F1"
                   strokeWidth={1 / zoom}
                   strokeOpacity={0.6}
                   pointerEvents="none"
@@ -1016,7 +1522,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 width={groupBounds.width + 8}
                 height={groupBounds.height + 8}
                 fill="none"
-                stroke="#2563EB"
+                stroke="#6366F1"
                 strokeWidth={1.5 / zoom}
                 strokeDasharray="5 3"
                 pointerEvents="none"
@@ -1038,7 +1544,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                   width={singleSelected.width}
                   height={singleSelected.height}
                   fill="none"
-                  stroke={singleSelected.locked ? '#D97706' : '#2563EB'}
+                  stroke={singleSelected.locked ? '#D97706' : '#6366F1'}
                   strokeWidth={1.5 / zoom}
                   strokeDasharray={singleSelected.locked ? '5 3' : undefined}
                   pointerEvents="none"
@@ -1051,7 +1557,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                       y1={0}
                       x2={singleSelected.width / 2}
                       y2={-24 / zoom}
-                      stroke="#2563EB"
+                      stroke="#6366F1"
                       strokeWidth={1.4 / zoom}
                       pointerEvents="none"
                     />
@@ -1068,7 +1574,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                       cy={-24 / zoom}
                       r={6 / zoom}
                       fill="#FFFFFF"
-                      stroke="#2563EB"
+                      stroke="#6366F1"
                       strokeWidth={1.8 / zoom}
                       pointerEvents="none"
                     />
@@ -1103,7 +1609,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                             height={hs}
                             rx={1.5 / zoom}
                             fill="#FFFFFF"
-                            stroke="#2563EB"
+                            stroke="#6366F1"
                             strokeWidth={1.5 / zoom}
                             pointerEvents="none"
                           />
@@ -1138,7 +1644,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                     setEditingTextId(null);
                   }
                 }}
-                className="h-full w-full rounded border-2 border-[#2563EB] bg-white/95 px-2 text-center font-bold text-[#141413] shadow-md focus:outline-none"
+                className="h-full w-full rounded border-2 border-indigo-500 bg-white/95 px-2 text-center font-bold text-[#141413] shadow-md focus:outline-none"
                 style={{
                   fontFamily: editingTextLayer.fontFamily,
                   fontSize: `${Math.max(14, editingTextLayer.fontSize * zoom * 0.65)}px`,
@@ -1147,21 +1653,25 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             </div>
           )}
         </div>
-      </div>
+        </div>
+        </div>
 
-      {/* Bottom Zoom & Page-Switcher Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822] px-3 sm:px-4 py-2 text-xs">
-        {/* Left: Multi-Page Switcher & Project Snapshot */}
-        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full">
+        {/* Bottom-Left Floating Workspace Controls Pill (Pages, Rulers, Grid, Snap, Bleed, Safe Zone, WCAG) */}
+        <div
+          className={`absolute bottom-3.5 ${
+            rulerUnit !== 'off' ? 'left-9' : 'left-3.5'
+          } z-30 flex items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/92 dark:bg-[#181B23]/92 px-2.5 py-1.5 text-xs shadow-lg backdrop-blur-md max-w-[calc(100%-260px)] sm:max-w-[calc(100%-360px)] overflow-x-auto`}
+        >
+          {/* Multi-Page Switcher */}
           {pages.map((p, idx) => {
             const active = idx === activePageIndex;
             return (
               <div
                 key={p.id}
-                className={`inline-flex items-center gap-1 rounded-full border pl-2.5 pr-1.5 py-1 text-[11px] font-semibold transition-colors shrink-0 ${
+                className={`inline-flex items-center gap-1 rounded-full border pl-2.5 pr-1.5 py-0.5 text-[11px] font-semibold transition-all shrink-0 ${
                   active
-                    ? 'border-[#1B4332] bg-[#1B4332]/10 text-[#1B4332] dark:border-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-300'
-                    : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] text-slate-600 dark:text-slate-300 hover:border-slate-400'
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-500/15 dark:text-indigo-300'
+                    : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] text-slate-600 dark:text-slate-300 hover:border-indigo-300'
                 }`}
               >
                 <button
@@ -1189,10 +1699,10 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             type="button"
             onClick={onAddPage}
             title="Duplicate current artboard as a new page"
-            className="inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-emerald-600 cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
           >
             <Plus className="h-3 w-3" />
-            <span className="hidden sm:inline">Add Page</span>
+            <span className="hidden xl:inline">Page</span>
           </button>
 
           {onSaveProject && (
@@ -1201,49 +1711,84 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               onClick={onSaveProject}
               title={
                 activeProjectName
-                  ? `Auto-saving "${activeProjectName}" (Click to save a new snapshot copy)`
+                  ? `Auto-saving "${activeProjectName}" (Click to save a snapshot copy)`
                   : 'Save logo to My Projects'
               }
-              className="hidden md:inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-emerald-600 cursor-pointer whitespace-nowrap shrink-0"
+              className="hidden xl:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
               {activeProjectName ? (
-                <BookmarkCheck className="h-3 w-3 text-[#1B4332] dark:text-emerald-400" />
+                <BookmarkCheck className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
               ) : (
-                <FolderPlus className="h-3 w-3 text-[#1B4332] dark:text-emerald-400" />
+                <FolderPlus className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
               )}
               <span>
                 {autoSaveState === 'saving'
                   ? 'Saving...'
                   : activeProjectName
-                    ? 'Save Copy'
-                    : 'Save Project'}
+                    ? 'Copy'
+                    : 'Save'}
               </span>
             </button>
           )}
-        </div>
 
-        {/* Center/Right: Grid, Snap, Safe Zone, Contrast Status, and Zoom Slider */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 ml-auto">
+          <span className="hidden md:inline h-4 w-px bg-[#E2E8F0] dark:bg-[#2A2F3D] shrink-0" aria-hidden="true" />
+
+          {cursorCoords && rulerUnit !== 'off' && (
+            <span className="hidden 2xl:inline-flex items-center font-mono-num text-[10.5px] text-slate-500 dark:text-slate-400 px-1 whitespace-nowrap shrink-0">
+              {rulerUnit === 'mm'
+                ? `${((cursorCoords.x * 25.4) / 96).toFixed(1)}, ${((cursorCoords.y * 25.4) / 96).toFixed(1)} mm`
+                : `${Math.round(cursorCoords.x)}, ${Math.round(cursorCoords.y)} px`}
+            </span>
+          )}
+
           <button
             type="button"
-            onClick={() => setShowGrid((v) => !v)}
-            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
-              showGrid
-                ? 'border-slate-900 bg-slate-900 text-white dark:border-emerald-500 dark:bg-emerald-600'
-                : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+            onClick={() =>
+              setRulerUnit((u) => (u === 'px' ? 'mm' : u === 'mm' ? 'off' : 'px'))
+            }
+            title="Toggle Workspace Rulers (px / mm / Off)"
+            className={`hidden md:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
+              rulerUnit !== 'off'
+                ? 'border-indigo-600 bg-indigo-600 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Ruler className="h-3 w-3" />
+            <span className="font-mono-num uppercase">
+              {rulerUnit === 'off' ? 'Ruler' : rulerUnit}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={cycleGridMode}
+            title="Cycle Grid Overlay: Off → Square Grid → Rule of Thirds → Golden Ratio (φ)"
+            className={`hidden md:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
+              gridMode !== 'off'
+                ? 'border-indigo-600 bg-indigo-600 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
             }`}
           >
             <Grid3x3 className="h-3 w-3" />
-            <span className="hidden sm:inline">Grid</span>
+            <span className="whitespace-nowrap">
+              {gridMode === 'off'
+                ? 'Grid Off'
+                : gridMode === 'square'
+                  ? 'Grid'
+                  : gridMode === 'thirds'
+                    ? '3rds'
+                    : 'φ Golden'}
+            </span>
           </button>
 
           <button
             type="button"
             onClick={() => setSnapEnabled((v) => !v)}
-            className={`inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+            title="Toggle Smart Snap Guides"
+            className={`hidden lg:inline-flex items-center rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
               snapEnabled
-                ? 'border-[#1B4332] bg-[#1B4332] text-white dark:border-emerald-500 dark:bg-emerald-600'
-                : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+                ? 'border-indigo-600 bg-indigo-600 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
             }`}
           >
             Snap
@@ -1251,21 +1796,35 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
 
           <button
             type="button"
+            onClick={() => setShowBleed((v) => !v)}
+            title="Toggle 3mm (12px) Print Bleed Trim Guides"
+            className={`hidden xl:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
+              showBleed
+                ? 'border-rose-600 bg-rose-600 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Scissors className="h-3 w-3" />
+            <span>Bleed</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowSafeZone((v) => !v)}
             title="Toggle 8% safe-margin overlay"
-            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+            className={`hidden xl:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
               showSafeZone
-                ? 'border-teal-700 bg-teal-700 text-white'
-                : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+                ? 'border-teal-600 bg-teal-600 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
             }`}
           >
             <Scan className="h-3 w-3" />
-            <span className="hidden md:inline">Safe Zone</span>
+            <span>Safe</span>
           </button>
 
           {contrastReport.checkedCount > 0 && (
             <div
-              className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10.5px] font-semibold whitespace-nowrap shrink-0 ${
+              className={`hidden lg:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] font-semibold whitespace-nowrap shrink-0 ${
                 contrastReport.hasCritical
                   ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300'
                   : contrastReport.hasWarning
@@ -1322,65 +1881,86 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             <button
               type="button"
               onClick={() => onSelectLayers([])}
-              className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] px-2 py-1 text-[10.5px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] px-2 py-0.5 text-[10.5px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#252A38] active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
               <RotateCcw className="h-3 w-3" />
               Deselect
             </button>
           )}
+        </div>
 
-          <span className="hidden sm:inline h-4 w-px bg-[#E2E8F0] dark:bg-[#2A2D3D]" aria-hidden="true" />
+        {/* Bottom-Right Floating Status Pill (Zoom 25%–400%, Fit to Screen & Mockup Quick-Toggle) */}
+        <div className="absolute bottom-3.5 right-3.5 z-30 inline-flex items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/92 dark:bg-[#181B23]/92 px-3 py-1.5 text-xs shadow-lg backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => {
+              userAdjustedZoomRef.current = true;
+              setZoom((z) => Math.max(0.25, +(z - 0.15).toFixed(2)));
+            }}
+            className="rounded-lg p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252A38] active:scale-95 transition-all cursor-pointer"
+            aria-label="Zoom out"
+            title="Zoom out"
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+          <input
+            type="range"
+            min={0.25}
+            max={4}
+            step={0.05}
+            value={zoom}
+            onChange={(e) => {
+              userAdjustedZoomRef.current = true;
+              setZoom(Number(e.target.value));
+            }}
+            aria-label="Canvas zoom slider (25% to 400%)"
+            className="hidden sm:block w-24 accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
+          />
+          <span className="font-mono-num w-10 text-center text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              userAdjustedZoomRef.current = true;
+              setZoom((z) => Math.min(4, +(z + 0.15).toFixed(2)));
+            }}
+            className="rounded-lg p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252A38] active:scale-95 transition-all cursor-pointer"
+            aria-label="Zoom in"
+            title="Zoom in"
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
 
-          {/* Zoom Controls */}
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                userAdjustedZoomRef.current = true;
-                setZoom((z) => Math.max(0.28, +(z - 0.12).toFixed(2)));
-              }}
-              className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
-              aria-label="Zoom out"
-            >
-              <ZoomOut className="h-3.5 w-3.5" />
-            </button>
-            <input
-              type="range"
-              min={0.28}
-              max={2.2}
-              step={0.04}
-              value={zoom}
-              onChange={(e) => {
-                userAdjustedZoomRef.current = true;
-                setZoom(Number(e.target.value));
-              }}
-              aria-label="Canvas zoom slider"
-              className="hidden sm:block w-20 accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
-            />
-            <span className="font-mono-num w-10 text-center text-[11px] font-semibold text-slate-800 dark:text-slate-200">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                userAdjustedZoomRef.current = true;
-                setZoom((z) => Math.min(2.2, +(z + 0.12).toFixed(2)));
-              }}
-              className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
-              aria-label="Zoom in"
-            >
-              <ZoomIn className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={handleFitZoom}
-              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2 py-1 text-[10.5px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer whitespace-nowrap shrink-0"
-              title="Fit artboard to viewport"
-            >
-              <Maximize2 className="h-3 w-3" />
-              Fit
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleFitZoom}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            title="Fit artboard to screen"
+          >
+            <Maximize2 className="h-3 w-3" />
+            <span>Fit</span>
+          </button>
+
+          {onOpenMockups && (
+            <>
+              <span className="h-4 w-px bg-[#E2E8F0] dark:bg-[#2A2F3D]" aria-hidden="true" />
+              <button
+                type="button"
+                role="switch"
+                aria-checked={false}
+                onClick={onOpenMockups}
+                title="Switch to Real-World Mockup Preview"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-300 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Eye className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">Mockups</span>
+                <span className="inline-flex h-3.5 w-6 items-center rounded-full bg-slate-200 dark:bg-[#2A2F3D] p-0.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-white dark:bg-slate-400 shadow-xs" />
+                </span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

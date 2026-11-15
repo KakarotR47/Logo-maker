@@ -49,6 +49,13 @@ function deepCloneLayersFresh(layers: LogoLayer[]): LogoLayer[] {
     if (base.type === 'custom-svg' && l.type === 'custom-svg') {
       return { ...base, paths: l.paths.map((p) => ({ ...p })) };
     }
+    if (base.type === 'text' && l.type === 'text') {
+      return {
+        ...base,
+        textEffect: l.textEffect ? { ...l.textEffect } : undefined,
+        textWarp: l.textWarp ? { ...l.textWarp } : undefined,
+      };
+    }
     if (base.type === 'path' && l.type === 'path') {
       return { ...base, pathDataList: [...l.pathDataList] };
     }
@@ -292,9 +299,29 @@ export function magicRecolorDocument(
       const minReq = layer.type === 'text' && layer.fontSize < 22 ? 4.5 : 3.0;
       const nextTextColor = pickContrasting(preferredOrder, effectiveBackdrop, minReq);
 
+      const nextTextEffect =
+        layer.type === 'text' && layer.textEffect && layer.textEffect.style !== 'none'
+          ? {
+              ...layer.textEffect,
+              primaryColor:
+                layer.textEffect.style === 'hollow'
+                  ? nextTextColor
+                  : layer.textEffect.style === 'splice' || layer.textEffect.style === 'extrude'
+                    ? pickContrasting([c2, c1, c0], effectiveBackdrop, 1.5)
+                    : layer.textEffect.primaryColor,
+              secondaryColor:
+                layer.textEffect.style === 'splice'
+                  ? nextTextColor
+                  : layer.textEffect.secondaryColor,
+            }
+          : layer.type === 'text'
+            ? layer.textEffect
+            : undefined;
+
       updatedLayers.push({
         ...layer,
         fill: nextTextColor,
+        ...(layer.type === 'text' ? { textEffect: nextTextEffect } : {}),
         fillGradient: layer.fillGradient?.enabled
           ? {
               ...layer.fillGradient,
@@ -381,6 +408,20 @@ function buildSingleInkVariant(
         strokeWidth: hollow ? Math.max(4, layer.strokeWidth) : layer.strokeWidth,
         fillGradient: undefined,
         fillPattern: undefined,
+      };
+    }
+
+    if (layer.type === 'text') {
+      const keepHollow = layer.textEffect?.style === 'hollow';
+      return {
+        ...layer,
+        fill: activeInk,
+        stroke: layer.strokeWidth > 0 ? activeInk : 'none',
+        fillGradient: undefined,
+        fillPattern: undefined,
+        textEffect: keepHollow
+          ? { style: 'hollow', offset: layer.textEffect?.offset ?? 2.5, primaryColor: activeInk }
+          : undefined,
       };
     }
 

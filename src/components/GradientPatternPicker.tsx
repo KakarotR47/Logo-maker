@@ -435,7 +435,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
   return (
     <div className="space-y-3">
       {/* Mode Tabs: Solid · Linear · Radial · Pattern */}
-      <div className="grid grid-cols-4 gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-100 dark:bg-[#1E202B] p-0.5 text-[10.5px] font-semibold">
+      <div className="grid grid-cols-4 gap-1 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-100 dark:bg-[#1E222D] p-0.5 text-[10.5px] font-semibold">
         {(
           [
             ['solid', 'Solid'],
@@ -450,7 +450,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
             onClick={() => switchTab(mode)}
             className={`rounded-lg py-1 transition-colors cursor-pointer ${
               currentTab === mode
-                ? 'bg-white dark:bg-[#2A2D3D] text-slate-900 dark:text-white shadow-xs'
+                ? 'bg-white dark:bg-[#2A2F3D] text-slate-900 dark:text-white shadow-xs'
                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
@@ -470,7 +470,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                 onClick={() => onUpdate({ fill: hex })}
                 className={`h-7 w-7 rounded-lg border cursor-pointer ${
                   layer.fill.toLowerCase() === hex.toLowerCase()
-                    ? 'ring-2 ring-emerald-600 ring-offset-1 border-black/30'
+                    ? 'ring-2 ring-indigo-500 ring-offset-1 border-black/30'
                     : 'border-black/15 dark:border-white/15'
                 }`}
                 style={{ backgroundColor: hex }}
@@ -482,13 +482,13 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
               value={toSafeHex(layer.fill === 'transparent' ? '#141413' : layer.fill)}
               onChange={(e) => onUpdate({ fill: e.target.value })}
               aria-label="Primary fill color"
-              className="h-7 w-8 cursor-pointer rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-transparent p-0.5"
+              className="h-7 w-8 cursor-pointer rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-transparent p-0.5"
             />
             {!isText && (
               <button
                 type="button"
                 onClick={() => onUpdate({ fill: 'transparent' })}
-                className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] px-2 py-1 text-[10px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] px-2 py-1 text-[10px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
               >
                 None
               </button>
@@ -509,7 +509,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                   type="button"
                   onClick={handleReverseStops}
                   title="Reverse gradient stops"
-                  className="inline-flex items-center gap-1 rounded-md border border-[#E2E8F0] dark:border-[#2A2D3D] px-1.5 py-0.5 text-[10px] hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                  className="inline-flex items-center gap-1 rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] px-1.5 py-0.5 text-[10px] hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
                 >
                   <ArrowLeftRight className="h-2.5 w-2.5" />
                   Flip
@@ -519,7 +519,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                   onClick={handleAddStop}
                   disabled={stops.length >= 6}
                   title="Add gradient color stop"
-                  className="inline-flex items-center gap-0.5 rounded-md border border-[#E2E8F0] dark:border-[#2A2D3D] px-1.5 py-0.5 text-[10px] hover:bg-slate-100 dark:hover:bg-[#252836] disabled:opacity-40 cursor-pointer"
+                  className="inline-flex items-center gap-0.5 rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] px-1.5 py-0.5 text-[10px] hover:bg-slate-100 dark:hover:bg-[#252836] disabled:opacity-40 cursor-pointer"
                 >
                   <Plus className="h-2.5 w-2.5" />
                   Stop
@@ -554,7 +554,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                       title={`${stop.color.toUpperCase()} @ ${stop.offset}%`}
                       className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 h-5 w-3.5 rounded-full border-2 shadow-md transition-transform cursor-ew-resize ${
                         active
-                          ? 'scale-115 border-slate-900 dark:border-white ring-2 ring-emerald-500/70 z-10'
+                          ? 'scale-115 border-slate-900 dark:border-white ring-2 ring-indigo-500/70 z-10'
                           : 'border-white dark:border-slate-200 hover:scale-105'
                       }`}
                       style={{
@@ -569,7 +569,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
 
             {/* Active Stop Editor */}
             {selectedStop && (
-              <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-1.5">
+              <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] px-2.5 py-1.5">
                 <input
                   type="color"
                   value={toSafeHex(selectedStop.color)}
@@ -594,7 +594,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                       commitGradient({}, next);
                     }
                   }}
-                  className="font-mono-num w-20 rounded-md border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822] px-1.5 py-0.5 text-[11px]"
+                  className="font-mono-num w-20 rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-1.5 py-0.5 text-[11px]"
                 />
                 <div className="flex items-center gap-1 ml-auto">
                   <input
@@ -609,7 +609,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                       );
                       commitGradient({}, next);
                     }}
-                    className="font-mono-num w-11 rounded-md border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822] px-1 py-0.5 text-right text-[11px]"
+                    className="font-mono-num w-11 rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-1 py-0.5 text-right text-[11px]"
                   />
                   <span className="text-[10px] text-slate-400">%</span>
                   <button
@@ -628,7 +628,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
 
           {/* Angle Dial (Linear) OR Focal Pad + Radius (Radial) */}
           {currentTab === 'linear' ? (
-            <div className="flex items-center gap-3 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] p-2.5">
+            <div className="flex items-center gap-3 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] p-2.5">
               <svg
                 ref={dialRef}
                 viewBox="0 0 48 48"
@@ -653,18 +653,18 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                   y1={24}
                   x2={knobX}
                   y2={knobY}
-                  stroke="#10B981"
+                  stroke="#6366F1"
                   strokeWidth={2}
                   strokeLinecap="round"
                 />
                 <circle cx={24} cy={24} r={2.5} fill="#64748B" />
-                <circle cx={knobX} cy={knobY} r={4.5} fill="#1B4332" stroke="#FFFFFF" strokeWidth={1.5} />
+                <circle cx={knobX} cy={knobY} r={4.5} fill="#4F46E5" stroke="#FFFFFF" strokeWidth={1.5} />
               </svg>
 
               <div className="flex-1 space-y-1.5 min-w-0">
                 <div className="flex items-center justify-between text-[11px] font-semibold">
                   <span>Angle</span>
-                  <span className="font-mono-num text-emerald-700 dark:text-emerald-400">
+                  <span className="font-mono-num text-indigo-600 dark:text-indigo-400">
                     {activeGradient.angle}°
                   </span>
                 </div>
@@ -674,10 +674,10 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                       key={deg}
                       type="button"
                       onClick={() => commitGradient({ angle: deg })}
-                      className={`rounded-md border py-0.5 text-[10px] font-mono-num cursor-pointer ${
+                      className={`rounded-lg border py-0.5 text-[10px] font-mono-num active:scale-95 transition-transform cursor-pointer ${
                         activeGradient.angle === deg
-                          ? 'border-emerald-600 bg-emerald-600 text-white'
-                          : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822]'
+                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                          : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117]'
                       }`}
                     >
                       {deg}°
@@ -687,7 +687,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-3 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] p-2.5">
+            <div className="flex items-center gap-3 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] p-2.5">
               <div
                 ref={focalRef}
                 onPointerDown={(e) => {
@@ -717,14 +717,14 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                   max={120}
                   value={activeGradient.radialR ?? 60}
                   onChange={(e) => commitGradient({ radialR: Number(e.target.value) })}
-                  className="w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                  className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
                 />
               </div>
             </div>
           )}
 
           {/* Curated Metallic / Luxury / Neon / Brand Presets */}
-          <div className="space-y-1.5 border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-2">
+          <div className="space-y-1.5 border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-2">
             <div className="flex items-center justify-between gap-1">
               {(['All', 'Metallic', 'Luxury', 'Neon', 'Brand'] as const).map((cat) => (
                 <button
@@ -733,8 +733,8 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                   onClick={() => setPresetCategory(cat)}
                   className={`rounded-full px-2 py-0.5 text-[9.5px] font-semibold cursor-pointer ${
                     presetCategory === cat
-                      ? 'bg-slate-900 dark:bg-emerald-600 text-white'
-                      : 'bg-slate-100 dark:bg-[#252836] text-slate-500 dark:text-slate-300'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 dark:bg-[#1E222D] text-slate-500 dark:text-slate-300'
                   }`}
                 >
                   {cat}
@@ -793,10 +793,10 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                   key={pat.kind}
                   type="button"
                   onClick={() => commitPattern({ preset: pat.kind })}
-                  className={`flex flex-col items-center gap-1 rounded-xl border p-1.5 text-[9.5px] font-semibold cursor-pointer ${
+                  className={`flex flex-col items-center gap-1 rounded-xl border p-1.5 text-[9.5px] font-semibold active:scale-95 transition-transform cursor-pointer ${
                     active
-                      ? 'border-emerald-600 bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
-                      : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+                      ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                      : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] text-slate-600 dark:text-slate-300'
                   }`}
                 >
                   <svg viewBox="0 0 16 16" className="h-5 w-5 rounded border border-black/10 bg-white">
@@ -815,7 +815,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <label className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2 py-1 text-[11px] font-medium">
+            <label className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] px-2 py-1 text-[11px] font-medium">
               <span>Ink</span>
               <input
                 type="color"
@@ -824,7 +824,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                 className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0"
               />
             </label>
-            <div className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2 py-1 text-[11px] font-medium">
+            <div className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] px-2 py-1 text-[11px] font-medium">
               <span>Backdrop</span>
               <div className="flex items-center gap-1">
                 <button
@@ -838,7 +838,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                     })
                   }
                   title="Toggle transparent pattern backdrop"
-                  className="rounded border border-[#E2E8F0] dark:border-[#2A2D3D] px-1 text-[9px] font-semibold cursor-pointer"
+                  className="rounded border border-[#E2E8F0] dark:border-[#2A2F3D] px-1 text-[9px] font-semibold cursor-pointer"
                 >
                   {activePattern.backgroundColor === 'transparent' ? 'None' : 'Clear'}
                 </button>
@@ -870,7 +870,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                 step={0.1}
                 value={activePattern.scale}
                 onChange={(e) => commitPattern({ scale: Number(e.target.value) })}
-                className="w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
               />
             </div>
             <div>
@@ -887,7 +887,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
                 step={15}
                 value={activePattern.rotation}
                 onChange={(e) => commitPattern({ rotation: Number(e.target.value) })}
-                className="w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
               />
             </div>
           </div>

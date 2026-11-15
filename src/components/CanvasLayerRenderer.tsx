@@ -262,12 +262,62 @@ export function buildDividerPrimitives(
   }
 }
 
+export function resolveEffectiveTextWarp(layer: TextLayer): {
+  mode: 'none' | 'arc-up' | 'arc-down' | 'circle' | 'wave' | 'slant';
+  strength: number;
+  slant: number;
+  perspective: number;
+} {
+  if (layer.textWarp) {
+    return {
+      mode: layer.textWarp.mode,
+      strength: layer.textWarp.strength ?? 0,
+      slant: layer.textWarp.slant ?? 0,
+      perspective: layer.textWarp.perspective ?? 0,
+    };
+  }
+  if (Math.abs(layer.curveRadius) >= 20) {
+    const strength = Math.max(8, Math.min(100, Math.round(((260 - Math.abs(layer.curveRadius)) / 240) * 100)));
+    return {
+      mode: layer.curveRadius > 0 ? 'arc-up' : 'arc-down',
+      strength,
+      slant: 0,
+      perspective: 0,
+    };
+  }
+  return { mode: 'none', strength: 0, slant: 0, perspective: 0 };
+}
+
 export function buildCurvedArcPath(
   layer: TextLayer
 ): { d: string; startOffset: string; textAnchor: 'start' | 'middle' | 'end' } {
-  const R = Math.max(28, Math.abs(layer.curveRadius));
+  const warp = resolveEffectiveTextWarp(layer);
   const cx = layer.width / 2;
-  const isConvex = layer.curveRadius > 0;
+  const cyBox = layer.height / 2;
+
+  if (warp.mode === 'wave') {
+    const padX = Math.max(8, layer.width * 0.04);
+    const spanW = Math.max(40, layer.width - padX * 2);
+    const x0 = padX;
+    const xMid = padX + spanW * 0.5;
+    const xEnd = padX + spanW;
+    const amp = Math.max(6, (warp.strength / 100) * Math.min(54, Math.max(24, layer.height * 0.42)));
+    const baseY = cyBox + layer.fontSize * 0.28;
+    const d = `M ${x0.toFixed(1)} ${baseY.toFixed(1)} C ${(x0 + spanW * 0.17).toFixed(1)} ${(baseY - amp).toFixed(1)}, ${(x0 + spanW * 0.33).toFixed(1)} ${(baseY - amp).toFixed(1)}, ${xMid.toFixed(1)} ${baseY.toFixed(1)} C ${(xMid + spanW * 0.17).toFixed(1)} ${(baseY + amp).toFixed(1)}, ${(xMid + spanW * 0.33).toFixed(1)} ${(baseY + amp).toFixed(1)}, ${xEnd.toFixed(1)} ${baseY.toFixed(1)}`;
+    return { d, startOffset: '50%', textAnchor: 'middle' };
+  }
+
+  if (warp.mode === 'circle') {
+    const minDim = Math.min(layer.width, Math.max(layer.height, layer.width * 0.55));
+    const R = Math.max(36, (minDim * 0.44) * (1.28 - (warp.strength / 100) * 0.58));
+    const circleCy = Math.max(R + layer.fontSize * 0.65, cyBox);
+    // Start near bottom so 50% middle lands centered cleanly at top apex of circle ring
+    const d = `M ${cx.toFixed(1)} ${(circleCy + R).toFixed(1)} A ${R.toFixed(1)} ${R.toFixed(1)} 0 1 1 ${(cx - 0.1).toFixed(1)} ${(circleCy + R).toFixed(1)}`;
+    return { d, startOffset: '50%', textAnchor: 'middle' };
+  }
+
+  const R = Math.max(28, Math.abs(layer.curveRadius || 140));
+  const isConvex = warp.mode === 'arc-down' ? false : warp.mode === 'arc-up' ? true : layer.curveRadius > 0;
 
   // Allow wrapping up to ~305 degrees around circular badges & seals
   const halfSpanAngle = Math.min(Math.PI * 0.85, Math.max(0.45, (layer.width * 0.46) / R));
@@ -725,24 +775,91 @@ function renderDivider(layer: DividerLayer, fillAttr: string) {
   return buildDividerPrimitives(layer.dividerKind, layer.width, layer.height, fillAttr);
 }
 
-function renderText(layer: TextLayer, arcPathId: string, fillAttr: string) {
+function buildTextSkewTransform(layer: TextLayer): string | undefined {
+  const warp = resolveEffectiveTextWarp(layer);
+  const slant = warp.slant ?? 0;
+  const perspective = warp.perspective ?? 0;
+  if (Math.abs(slant) < 0.2 && Math.abs(perspective) < 0.2) return undefined;
+
+  const cx = layer.width / 2;
+  const cy = layer.height / 2;
+  const ops: string[] = [`translate(${cx.toFixed(1)}, ${cy.toFixed(1)})`];
+  if (Math.abs(slant) >= 0.2) {
+    ops.push(`skewX(${(-slant).toFixed(1)})`);
+  }
+  if (Math.abs(perspective) >= 0.2) {
+    ops.push(`skewY(${(perspective * 0.45).toFixed(1)})`);
+    const yScale = Math.max(0.68, 1 - Math.abs(perspective) * 0.006);
+    ops.push(`scale(1, ${yScale.toFixed(3)})`);
+  }
+  ops.push(`translate(${(-cx).toFixed(1)}, ${(-cy).toFixed(1)})`);
+  return ops.join(' ');
+}
+
+function renderText(layer: TextLayer, idBase: string, fillAttr: string) {
+  const arcPathId = `${idBase}-path`;
   const raw = layer.uppercase ? layer.text.toUpperCase() : layer.text;
   const lines = raw.split(/\r?\n/);
+  const warp = resolveEffectiveTextWarp(layer);
+  const usesWarpPath =
+    warp.mode === 'arc-up' ||
+    warp.mode === 'arc-down' ||
+    warp.mode === 'circle' ||
+    warp.mode === 'wave' ||
+    (warp.mode === 'none' && Math.abs(layer.curveRadius) >= 20);
 
-  if (Math.abs(layer.curveRadius) >= 20) {
-    const arc = buildCurvedArcPath(layer);
-    return (
-      <>
-        <defs>
-          <path id={arcPathId} d={arc.d} fill="none" />
-        </defs>
+  const arc = usesWarpPath ? buildCurvedArcPath(layer) : null;
+  const skewTransform = buildTextSkewTransform(layer);
+
+  const anchor: 'start' | 'middle' | 'end' =
+    layer.textAlign === 'left' ? 'start' : layer.textAlign === 'right' ? 'end' : 'middle';
+  const xPos =
+    layer.textAlign === 'left' ? 4 : layer.textAlign === 'right' ? layer.width - 4 : layer.width / 2;
+  const totalTextHeight = lines.length * layer.fontSize * layer.lineHeight;
+  const firstY = Math.max(
+    layer.fontSize * 0.85,
+    (layer.height - totalTextHeight) / 2 + layer.fontSize * 0.82
+  );
+
+  const effect = layer.textEffect;
+  const style = effect?.style ?? 'none';
+  const intensity = Math.max(0.3, Math.min(2.0, effect?.intensity ?? 1));
+  const effOffset = Math.max(2, Math.min(18, effect?.offset ?? 6));
+  const effAngleRad = (((effect?.angle ?? 45) * Math.PI) / 180);
+  const dx = Math.cos(effAngleRad) * effOffset;
+  const dy = Math.sin(effAngleRad) * effOffset;
+
+  const neonFilterId = `${idBase}-neon`;
+  const foilGradId = `${idBase}-foil`;
+
+  const renderGlyphPass = (opts: {
+    key: string;
+    fill: string;
+    stroke?: string;
+    strokeWidth?: number;
+    dxOffset?: number;
+    dyOffset?: number;
+    opacity?: number;
+    filter?: string;
+  }) => {
+    const translateStr =
+      opts.dxOffset || opts.dyOffset
+        ? `translate(${(opts.dxOffset ?? 0).toFixed(2)}, ${(opts.dyOffset ?? 0).toFixed(2)})`
+        : undefined;
+
+    if (usesWarpPath && arc) {
+      return (
         <text
-          fill={fillAttr}
-          stroke={layer.strokeWidth > 0 ? layer.stroke : 'none'}
-          strokeWidth={layer.strokeWidth}
+          key={opts.key}
+          transform={translateStr}
+          fill={opts.fill}
+          fillOpacity={opts.opacity}
+          stroke={opts.stroke ?? 'none'}
+          strokeWidth={opts.strokeWidth ?? 0}
           strokeLinejoin="round"
           strokeLinecap="round"
           paintOrder="stroke fill"
+          filter={opts.filter}
           fontFamily={layer.fontFamily}
           fontWeight={layer.fontWeight}
           fontStyle={layer.fontStyle}
@@ -758,45 +875,226 @@ function renderText(layer: TextLayer, arcPathId: string, fillAttr: string) {
             {lines[0]}
           </textPath>
         </text>
-      </>
+      );
+    }
+
+    return (
+      <text
+        key={opts.key}
+        x={xPos}
+        y={firstY}
+        transform={translateStr}
+        textAnchor={anchor}
+        fill={opts.fill}
+        fillOpacity={opts.opacity}
+        stroke={opts.stroke ?? 'none'}
+        strokeWidth={opts.strokeWidth ?? 0}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        paintOrder="stroke fill"
+        filter={opts.filter}
+        fontFamily={layer.fontFamily}
+        fontWeight={layer.fontWeight}
+        fontStyle={layer.fontStyle}
+        fontSize={layer.fontSize}
+        letterSpacing={`${layer.letterSpacing}em`}
+        style={{ userSelect: 'none' }}
+      >
+        {lines.map((line, i) => (
+          <tspan
+            key={i}
+            x={xPos}
+            dy={i === 0 ? 0 : layer.fontSize * layer.lineHeight}
+          >
+            {line || ' '}
+          </tspan>
+        ))}
+      </text>
+    );
+  };
+
+  let effectDefs: React.ReactNode = null;
+  const passes: React.ReactNode[] = [];
+
+  if (style === 'hollow') {
+    const sw = Math.max(1.4, (layer.strokeWidth > 0 ? layer.strokeWidth : 2.6) * intensity);
+    const strokeCol =
+      effect?.primaryColor ||
+      (layer.strokeWidth > 0 && layer.stroke !== 'none' ? layer.stroke : fillAttr);
+    passes.push(
+      renderGlyphPass({
+        key: 'hollow',
+        fill: 'none',
+        stroke: strokeCol,
+        strokeWidth: sw,
+      })
+    );
+  } else if (style === 'splice') {
+    const shadowFill = effect?.primaryColor || '#F59E0B';
+    const outlineCol = effect?.secondaryColor || layer.fill;
+    const sw = Math.max(1.6, 2.4 * intensity);
+    passes.push(
+      renderGlyphPass({
+        key: 'splice-back',
+        fill: shadowFill,
+        dxOffset: dx,
+        dyOffset: dy,
+        opacity: 0.94,
+      }),
+      renderGlyphPass({
+        key: 'splice-front',
+        fill: 'none',
+        stroke: outlineCol,
+        strokeWidth: sw,
+      })
+    );
+  } else if (style === 'neon') {
+    const glowColor = effect?.primaryColor || layer.fill;
+    const coreColor = effect?.secondaryColor || '#FFFFFF';
+    const outerStd = Math.max(3, 6.5 * intensity);
+    const innerStd = Math.max(1.2, 2.2 * intensity);
+    effectDefs = (
+      <filter id={neonFilterId} x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation={outerStd} result="blurOuter" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation={innerStd} result="blurInner" />
+        <feMerge>
+          <feMergeNode in="blurOuter" />
+          <feMergeNode in="blurOuter" />
+          <feMergeNode in="blurInner" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    );
+    passes.push(
+      renderGlyphPass({
+        key: 'neon-halo',
+        fill: glowColor,
+        stroke: glowColor,
+        strokeWidth: Math.max(2, 3.4 * intensity),
+        filter: `url(#${neonFilterId})`,
+      }),
+      renderGlyphPass({
+        key: 'neon-core',
+        fill: coreColor,
+        stroke: glowColor,
+        strokeWidth: Math.max(0.8, 1.1 * intensity),
+        opacity: 0.96,
+      })
+    );
+  } else if (style === 'extrude') {
+    const depthColor = effect?.primaryColor || '#1E293B';
+    const steps = Math.max(5, Math.min(12, Math.round(effOffset * 1.2)));
+    for (let s = steps; s >= 1; s--) {
+      const t = s / steps;
+      passes.push(
+        renderGlyphPass({
+          key: `ext-${s}`,
+          fill: depthColor,
+          stroke: depthColor,
+          strokeWidth: 0.8,
+          dxOffset: dx * t * 1.35,
+          dyOffset: dy * t * 1.35,
+          opacity: s === steps ? 0.9 : 1,
+        })
+      );
+    }
+    passes.push(
+      renderGlyphPass({
+        key: 'ext-face',
+        fill: fillAttr,
+        stroke: layer.strokeWidth > 0 ? layer.stroke : effect?.secondaryColor || 'none',
+        strokeWidth: layer.strokeWidth > 0 ? layer.strokeWidth : effect?.secondaryColor ? 1.2 : 0,
+      })
+    );
+  } else if (style === 'glitch') {
+    const cyan = effect?.primaryColor || '#06B6D4';
+    const magenta = effect?.secondaryColor || '#F43F5E';
+    const shift = effOffset * 0.72 * intensity;
+    passes.push(
+      renderGlyphPass({
+        key: 'glitch-c',
+        fill: cyan,
+        dxOffset: -shift,
+        dyOffset: -shift * 0.22,
+        opacity: 0.84,
+      }),
+      renderGlyphPass({
+        key: 'glitch-m',
+        fill: magenta,
+        dxOffset: shift,
+        dyOffset: shift * 0.22,
+        opacity: 0.84,
+      }),
+      renderGlyphPass({
+        key: 'glitch-main',
+        fill: fillAttr,
+        stroke: layer.strokeWidth > 0 ? layer.stroke : 'none',
+        strokeWidth: layer.strokeWidth,
+      })
+    );
+  } else if (style === 'foil') {
+    const highlight = effect?.primaryColor || '#FFF3C4';
+    const mid = layer.fill === 'transparent' || layer.fill === '#141413' ? '#D4AF37' : layer.fill;
+    const shadowCol = effect?.secondaryColor || '#78550B';
+    effectDefs = (
+      <linearGradient
+        id={foilGradId}
+        gradientUnits="userSpaceOnUse"
+        x1="0"
+        y1="0"
+        x2={layer.width}
+        y2={layer.height}
+      >
+        <stop offset="0%" stopColor={highlight} />
+        <stop offset="22%" stopColor={mid} />
+        <stop offset="48%" stopColor={shadowCol} />
+        <stop offset="72%" stopColor={highlight} />
+        <stop offset="100%" stopColor={mid} />
+      </linearGradient>
+    );
+    passes.push(
+      renderGlyphPass({
+        key: 'foil-depth',
+        fill: shadowCol,
+        dxOffset: 1.2 * intensity,
+        dyOffset: 1.6 * intensity,
+        opacity: 0.65,
+      }),
+      renderGlyphPass({
+        key: 'foil-sheen',
+        fill: highlight,
+        dxOffset: -0.7,
+        dyOffset: -0.7,
+        opacity: 0.5,
+      }),
+      renderGlyphPass({
+        key: 'foil-face',
+        fill: `url(#${foilGradId})`,
+        stroke: shadowCol,
+        strokeWidth: Math.max(0.5, layer.strokeWidth),
+      })
+    );
+  } else {
+    passes.push(
+      renderGlyphPass({
+        key: 'base',
+        fill: fillAttr,
+        stroke: layer.strokeWidth > 0 ? layer.stroke : 'none',
+        strokeWidth: layer.strokeWidth,
+      })
     );
   }
 
-  const anchor: 'start' | 'middle' | 'end' =
-    layer.textAlign === 'left' ? 'start' : layer.textAlign === 'right' ? 'end' : 'middle';
-  const xPos =
-    layer.textAlign === 'left' ? 4 : layer.textAlign === 'right' ? layer.width - 4 : layer.width / 2;
-  const totalTextHeight = lines.length * layer.fontSize * layer.lineHeight;
-  const firstY = Math.max(layer.fontSize * 0.85, (layer.height - totalTextHeight) / 2 + layer.fontSize * 0.82);
-
   return (
-    <text
-      x={xPos}
-      y={firstY}
-      textAnchor={anchor}
-      fill={fillAttr}
-      stroke={layer.strokeWidth > 0 ? layer.stroke : 'none'}
-      strokeWidth={layer.strokeWidth}
-      strokeLinejoin="round"
-      strokeLinecap="round"
-      paintOrder="stroke fill"
-      fontFamily={layer.fontFamily}
-      fontWeight={layer.fontWeight}
-      fontStyle={layer.fontStyle}
-      fontSize={layer.fontSize}
-      letterSpacing={`${layer.letterSpacing}em`}
-      style={{ userSelect: 'none' }}
-    >
-      {lines.map((line, i) => (
-        <tspan
-          key={i}
-          x={xPos}
-          dy={i === 0 ? 0 : layer.fontSize * layer.lineHeight}
-        >
-          {line || ' '}
-        </tspan>
-      ))}
-    </text>
+    <g transform={skewTransform}>
+      {(arc || effectDefs) && (
+        <defs>
+          {arc && <path id={arcPathId} d={arc.d} fill="none" />}
+          {effectDefs}
+        </defs>
+      )}
+      {passes}
+    </g>
   );
 }
 
