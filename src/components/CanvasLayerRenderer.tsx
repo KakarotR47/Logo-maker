@@ -262,9 +262,15 @@ export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(({ layer, 
 
   const cx = layer.x + layer.width / 2;
   const cy = layer.y + layer.height / 2;
+  const flipTransform =
+    layer.flipX || layer.flipY
+      ? ` translate(${layer.flipX ? layer.width : 0}, ${layer.flipY ? layer.height : 0}) scale(${
+          layer.flipX ? -1 : 1
+        }, ${layer.flipY ? -1 : 1})`
+      : '';
   const transform = `translate(${layer.x}, ${layer.y})${
     layer.rotation ? ` rotate(${layer.rotation}, ${layer.width / 2}, ${layer.height / 2})` : ''
-  }`;
+  }${flipTransform}`;
   const filterId = `${idPrefix}-sh-${layer.id}`;
   const { fillAttr, gradientDef } = getLayerFillProps(layer, idPrefix);
 

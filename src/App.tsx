@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, Moon, Sun } from 'lucide-react';
 import { BrandBriefGrid } from './components/BrandBriefGrid';
 import { BrandKitView } from './components/BrandKitView';
 import { TracedSymbolPayload } from './components/AiMagicPanel';
-import { EditorInspector } from './components/EditorInspector';
-import { EditorLeftSidebar } from './components/EditorLeftSidebar';
+import { EditorLeftSidebar, UploadedSvgEntry } from './components/EditorLeftSidebar';
 import { ExportModal } from './components/ExportModal';
+import { LandingView } from './components/LandingView';
 import { LogoCanvasEditor } from './components/LogoCanvasEditor';
 import { LogoWizardModal } from './components/LogoWizardModal';
 import { MockupPreviewView } from './components/MockupPreviewView';
 import { ProjectsDashboard } from './components/ProjectsDashboard';
+import { VariationsModal } from './components/VariationsModal';
 import { VisitingCardAtelier } from './components/VisitingCardAtelier';
 import {
   DEFAULT_BRAND_BRIEF,
@@ -22,6 +23,7 @@ import {
   DividerKind,
   FontOption,
   FontPairing,
+  IndustryCategory,
   LayoutArchetype,
   LogoConcept,
   LogoDocument,
@@ -33,6 +35,12 @@ import {
   StudioViewMode,
   TextLayer,
 } from './types/logo';
+import { PlanTier } from './types/monetization';
+import {
+  generateFourLogoVariations,
+  LogoVariationEntry,
+  magicRecolorDocument,
+} from './utils/brandTools';
 import { loadGoogleFont } from './utils/googleFonts';
 import {
   buildDocumentForArchetype,
@@ -69,7 +77,15 @@ export default function App() {
   }
   const initialSession = initialSessionRef.current;
 
-  const [viewMode, setViewMode] = useState<StudioViewMode>('editor');
+  const [viewMode, setViewMode] = useState<StudioViewMode>('landing');
+  const [studioTheme, setStudioTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      return localStorage.getItem('forma-studio-theme') === 'dark' ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+  const [planTier, setPlanTier] = useState<PlanTier>('pro');
   const [brief, setBrief] = useState<BrandBrief>(
     () => initialSession?.brief ?? DEFAULT_BRAND_BRIEF
   );
@@ -85,16 +101,22 @@ export default function App() {
     future: [],
   }));
 
+  const [pages, setPages] = useState<LogoDocument[]>(() => [history.present]);
+  const [activePageIndex, setActivePageIndex] = useState<number>(0);
+  const [uploadedSvgs, setUploadedSvgs] = useState<UploadedSvgEntry[]>([]);
+
   const [projects, setProjects] = useState<LogoProject[]>(() => loadSavedProjects());
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     () => initialSession?.activeProjectId ?? null
   );
   const [autoSaveState, setAutoSaveState] = useState<'saved' | 'saving'>('saved');
-  const [mobileEditorPanel, setMobileEditorPanel] = useState<'tools' | 'inspector'>('tools');
 
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [exportOpen, setExportOpen] = useState<boolean>(false);
   const [wizardOpen, setWizardOpen] = useState<boolean>(false);
+  const [variationsOpen, setVariationsOpen] = useState<boolean>(false);
+  const [generatedVariations, setGeneratedVariations] = useState<LogoVariationEntry[]>([]);
+  const [recolorStep, setRecolorStep] = useState<number>(0);
   const [incomingLogoNonce, setIncomingLogoNonce] = useState<number>(0);
 
   const [savedKits, setSavedKits] = useState<SavedBrandKit[]>(() => {
@@ -105,6 +127,15 @@ export default function App() {
       return [];
     }
   });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', studioTheme === 'dark');
+    try {
+      localStorage.setItem('forma-studio-theme', studioTheme);
+    } catch {
+      // Ignore storage errors
+    }
+  }, [studioTheme]);
 
   const activeDoc = history.present;
   const activePalette = useMemo(() => resolvePalette(brief.paletteId), [brief.paletteId]);
@@ -336,6 +367,8 @@ export default function App() {
 
   const handleOpenConceptInEditor = (concept: LogoConcept) => {
     commitDocument(concept.document);
+    setPages([concept.document]);
+    setActivePageIndex(0);
     setSelectedLayerIds(concept.document.layers[0] ? [concept.document.layers[0].id] : []);
     setViewMode('editor');
   };
@@ -431,13 +464,57 @@ export default function App() {
     setSelectedLayerIds([layer.id]);
   };
 
-  const handleUploadCustomSvg = (svgText: string, fileName: string) => {
+  const handleUploadCustomSvg = (svgText: string, fileName: string, recordUpload = true) => {
+    if (recordUpload) {
+      setUploadedSvgs((prev) => [
+        {
+          id: `up-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          name: fileName.replace(/\.svg$/i, '') || 'Uploaded SVG',
+          svgText,
+          addedAt: new Date().toISOString(),
+        },
+        ...prev.slice(0, 19),
+      ]);
+    }
     const layer = parseUploadedSvgToLayer(svgText, fileName, activePalette.primary, {
       x: activeDoc.width / 2,
       y: activeDoc.height / 2,
     });
     commitDocument({ ...activeDoc, layers: [...activeDoc.layers, layer] });
     setSelectedLayerIds([layer.id]);
+  };
+
+  const handleSwitchPage = (index: number) => {
+    if (index === activePageIndex || index < 0 || index >= pages.length) return;
+    const syncedPages = pages.map((p, i) => (i === activePageIndex ? activeDoc : p));
+    const targetDoc = syncedPages[index];
+    setPages(syncedPages);
+    setActivePageIndex(index);
+    setHistory({ past: [], present: targetDoc, future: [] });
+    setSelectedLayerIds([]);
+  };
+
+  const handleAddPage = () => {
+    const syncedPages = pages.map((p, i) => (i === activePageIndex ? activeDoc : p));
+    const nextNum = syncedPages.length + 1;
+    const copyDoc = cloneDocumentForProject(activeDoc, `${activeDoc.title} · Page ${nextNum}`);
+    copyDoc.id = nextLayerId('doc');
+    const nextPages = [...syncedPages, copyDoc];
+    setPages(nextPages);
+    setActivePageIndex(nextPages.length - 1);
+    setHistory({ past: [], present: copyDoc, future: [] });
+    setSelectedLayerIds([]);
+  };
+
+  const handleRemovePage = (index: number) => {
+    if (pages.length <= 1) return;
+    const syncedPages = pages.map((p, i) => (i === activePageIndex ? activeDoc : p));
+    const nextPages = syncedPages.filter((_, i) => i !== index);
+    const nextIndex = Math.min(activePageIndex, nextPages.length - 1);
+    setPages(nextPages);
+    setActivePageIndex(nextIndex);
+    setHistory({ past: [], present: nextPages[nextIndex], future: [] });
+    setSelectedLayerIds([]);
   };
 
   const handleInsertTracedSymbol = (payload: TracedSymbolPayload) => {
@@ -661,6 +738,51 @@ export default function App() {
     });
   };
 
+  const handleMagicRecolor = () => {
+    const nextStep = recolorStep + 1;
+    setRecolorStep(nextStep);
+    const recolored = magicRecolorDocument(activeDoc, activePalette, nextStep);
+    commitDocument(recolored);
+  };
+
+  const handleOpenVariations = () => {
+    const list = generateFourLogoVariations(activeDoc, brief, activePalette);
+    setGeneratedVariations(list);
+    setVariationsOpen(true);
+  };
+
+  const handleSaveFourVariationsToProjects = (variations: LogoVariationEntry[]) => {
+    const now = new Date().toISOString();
+    const batch: LogoProject[] = variations.map((entry, idx) => ({
+      id: `proj-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      name: entry.document.title,
+      createdAt: now,
+      updatedAt: now,
+      brief: { ...brief },
+      document: cloneDocumentForProject(entry.document, entry.document.title),
+    }));
+    const next = [...batch, ...projects];
+    setProjects(next);
+    persistSavedProjects(next);
+  };
+
+  const handleFixTextContrast = (layerId: string, suggestedHex: string) => {
+    commitDocument({
+      ...activeDoc,
+      layers: activeDoc.layers.map((l) =>
+        l.id === layerId
+          ? {
+              ...l,
+              fill: suggestedHex,
+              fillGradient: l.fillGradient?.enabled
+                ? { ...l.fillGradient, enabled: false }
+                : l.fillGradient,
+            }
+          : l
+      ),
+    });
+  };
+
   const handleSwitchLayout = (archetype: LayoutArchetype) => {
     const iconLayer = activeDoc.layers.find((l) => l.type === 'icon');
     const nextDoc = buildDocumentForArchetype(
@@ -857,6 +979,8 @@ export default function App() {
   const handleLoadKit = (kit: SavedBrandKit) => {
     setBrief(kit.brief);
     commitDocument(kit.primaryDocument);
+    setPages([kit.primaryDocument]);
+    setActivePageIndex(0);
     setSelectedLayerIds([]);
     setViewMode('editor');
   };
@@ -920,6 +1044,8 @@ export default function App() {
     setActiveProjectId(null);
     setBrief(blankBrief);
     setHistory({ past: [], present: blankDoc, future: [] });
+    setPages([blankDoc]);
+    setActivePageIndex(0);
     setSelectedLayerIds([]);
     setViewMode('editor');
   };
@@ -931,6 +1057,8 @@ export default function App() {
       present: project.document,
       future: [],
     });
+    setPages([project.document]);
+    setActivePageIndex(0);
     setActiveProjectId(project.id);
     setSelectedLayerIds([]);
     setViewMode('editor');
@@ -999,39 +1127,101 @@ export default function App() {
     setExportOpen(true);
   };
 
+  const handleStartFromLanding = (brandName: string, industry: IndustryCategory) => {
+    const nextBrief: BrandBrief = {
+      ...brief,
+      businessName: brandName,
+      industry,
+    };
+    setBrief(nextBrief);
+    const nextConcepts = generateTwelveLogoConcepts(nextBrief);
+    setConcepts(nextConcepts);
+    if (nextConcepts[0]) {
+      setActiveProjectId(null);
+      commitDocument(nextConcepts[0].document);
+    }
+    setSelectedLayerIds([]);
+    setViewMode('concepts');
+  };
+
+  const handleOpenSampleFromLanding = (sampleBrief: BrandBrief, sampleDoc: LogoDocument) => {
+    setActiveProjectId(null);
+    setBrief(sampleBrief);
+    setConcepts(generateTwelveLogoConcepts(sampleBrief));
+    commitDocument(sampleDoc);
+    setPages([sampleDoc]);
+    setActivePageIndex(0);
+    setSelectedLayerIds([]);
+    setViewMode('editor');
+  };
+
+  if (viewMode === 'landing') {
+    return (
+      <>
+        <LandingView
+          initialBrandName={brief.businessName === DEFAULT_BRAND_BRIEF.businessName ? '' : brief.businessName}
+          savedProjectsCount={projects.length}
+          onStartWithBrandName={handleStartFromLanding}
+          onOpenBlankEditor={() => setViewMode('editor')}
+          onOpenSampleInEditor={handleOpenSampleFromLanding}
+          onOpenProjects={() => setViewMode('projects')}
+        />
+        <LogoWizardModal
+          isOpen={wizardOpen}
+          onClose={() => setWizardOpen(false)}
+          brief={brief}
+          setBrief={setBrief}
+          activePalette={activePalette}
+          onGenerate={handleWizardGenerate}
+          onInsertTracedSymbol={handleInsertTracedSymbol}
+          onGenerateWithAiSymbol={handleWizardGenerateWithAiSymbol}
+        />
+      </>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#F4F3EF] text-[#141413]">
-      {/* Responsive Top Navigation Bar */}
-      <header className="border-b border-[#DCD9D0] bg-[#FAF9F6]">
-        <div className="mx-auto flex max-w-[1440px] flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-6 px-4 sm:px-6 py-2.5 md:py-3">
-          {/* Row 1 on Mobile / Zone 1+3 Split */}
+    <div className="min-h-screen flex flex-col bg-[#F8FAFC] dark:bg-[#0F1117] text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Sleek Studio Top Navigation Header */}
+      <header className="border-b border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822]">
+        <div className="mx-auto flex max-w-[1600px] flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-5 px-4 sm:px-5 py-2.5">
           <div className="flex items-center justify-between gap-3 md:contents">
             <div className="flex items-center gap-2.5 min-w-0">
               <button
                 type="button"
-                onClick={() => setViewMode('editor')}
-                className="font-display text-lg sm:text-xl font-bold tracking-tight text-[#141413] whitespace-nowrap shrink-0 cursor-pointer"
+                onClick={() => setViewMode('landing')}
+                title="Return to Forma Studio Home"
+                className="font-display text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 cursor-pointer"
               >
                 Forma Studio
               </button>
               <span
-                className="hidden sm:inline-flex items-center gap-1.5 rounded-md bg-[#EFECE4] px-2 py-0.5 text-[10.5px] font-medium text-[#5C5951] whitespace-nowrap"
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-0.5 text-[10.5px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap"
                 title="Changes auto-save locally to your browser"
               >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    autoSaveState === 'saving' ? 'bg-amber-500 animate-pulse' : 'bg-[#1B4332]'
-                  }`}
-                />
                 {autoSaveState === 'saving' ? 'Saving…' : 'Saved'}
               </span>
             </div>
 
-            <div className="shrink-0 md:order-3">
+            <div className="flex items-center gap-2 shrink-0 md:order-3">
+              <button
+                type="button"
+                onClick={() => setStudioTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+                title={studioTheme === 'light' ? 'Switch to Dark Studio Theme' : 'Switch to Light Studio Theme'}
+                aria-label="Toggle Light/Dark Studio Theme"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] text-slate-700 dark:text-slate-200 hover:border-slate-400 dark:hover:border-slate-500 shadow-xs transition-colors cursor-pointer"
+              >
+                {studioTheme === 'light' ? (
+                  <Moon className="h-4 w-4" />
+                ) : (
+                  <Sun className="h-4 w-4 text-amber-400" />
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={() => setExportOpen(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#141413] px-3.5 sm:px-4 py-2 text-xs font-semibold text-white hover:bg-[#2A2926] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#1B4332] via-[#245942] to-[#2D6A4F] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:brightness-110 transition-all whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5" />
                 Export Logo
@@ -1039,8 +1229,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Zone 2: Concise Navigation Links (scrolls horizontally on mobile/tablet) */}
-          <nav className="flex items-center gap-4 sm:gap-5 lg:gap-6 text-xs sm:text-sm font-medium text-[#55524B] overflow-x-auto pb-0.5 md:pb-0 md:order-2">
+          <nav className="flex items-center gap-4 sm:gap-5 lg:gap-6 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 overflow-x-auto pb-0.5 md:pb-0 md:order-2">
             {(
               [
                 { id: 'editor', label: 'Canvas Editor' },
@@ -1062,8 +1251,8 @@ export default function App() {
                   onClick={() => setViewMode(item.id)}
                   className={`border-b-2 py-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
-                      ? 'border-[#141413] font-semibold text-[#141413]'
-                      : 'border-transparent hover:text-[#141413]'
+                      ? 'border-[#1B4332] dark:border-emerald-400 font-semibold text-slate-900 dark:text-white'
+                      : 'border-transparent hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
                 >
                   {item.label}
@@ -1076,66 +1265,35 @@ export default function App() {
 
       {/* Main Workspace */}
       {viewMode === 'editor' && (
-        <main className="flex flex-1 flex-col lg:flex-row min-h-0">
-          {/* Mobile/Tablet Panel Switcher (visible below Canvas on < lg screens) */}
-          <div className="order-2 lg:hidden flex items-center justify-between gap-2 border-y border-[#DCD9D0] bg-[#EFECE4] px-3 py-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-[#E2DFD7] p-0.5 flex-1">
-              <button
-                type="button"
-                onClick={() => setMobileEditorPanel('tools')}
-                className={`rounded-md py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                  mobileEditorPanel === 'tools'
-                    ? 'bg-white text-[#141413] shadow-xs'
-                    : 'text-[#55524B] hover:text-[#141413]'
-                }`}
-              >
-                Vectors, Type &amp; Layers
-              </button>
-              <button
-                type="button"
-                onClick={() => setMobileEditorPanel('inspector')}
-                className={`rounded-md py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                  mobileEditorPanel === 'inspector'
-                    ? 'bg-white text-[#141413] shadow-xs'
-                    : 'text-[#55524B] hover:text-[#141413]'
-                }`}
-              >
-                Inspector{selectedLayers.length > 0 ? ` (${selectedLayers.length})` : ''}
-              </button>
-            </div>
-          </div>
+        <main className="flex flex-1 flex-col lg:flex-row min-h-0 overflow-hidden">
+          <EditorLeftSidebar
+            doc={activeDoc}
+            activePalette={activePalette}
+            activeStyle={brief.style}
+            selectedLayerIds={selectedLayerIds}
+            uploadedSvgs={uploadedSvgs}
+            onSelectLayers={setSelectedLayerIds}
+            onAddIcon={handleAddIcon}
+            onAddShape={handleAddShape}
+            onAddDivider={handleAddDivider}
+            onUploadCustomSvg={handleUploadCustomSvg}
+            onInsertTracedSymbol={handleInsertTracedSymbol}
+            onAddText={handleAddText}
+            onApplyFontPairing={handleApplyFontPairing}
+            onApplyFontToSelectedOrPrimary={handleApplyFontToSelectedOrPrimary}
+            onApplyPalette={handleApplyPalette}
+            onMagicRecolor={handleMagicRecolor}
+            onOpenVariations={handleOpenVariations}
+            onSwitchLayout={handleSwitchLayout}
+            onSwitchStyle={handleSwitchStyle}
+            onToggleLayerVisible={handleToggleLayerVisible}
+            onToggleLayerLock={handleToggleLayerLock}
+            onReorderLayer={handleReorderLayer}
+            onDuplicateLayer={handleDuplicateLayer}
+            onDeleteLayer={handleDeleteLayer}
+          />
 
-          <div
-            className={`${
-              mobileEditorPanel === 'tools' ? 'block' : 'hidden'
-            } lg:flex order-3 lg:order-1 min-w-0`}
-          >
-            <EditorLeftSidebar
-              doc={activeDoc}
-              activePalette={activePalette}
-              activeStyle={brief.style}
-              selectedLayerIds={selectedLayerIds}
-              onSelectLayers={setSelectedLayerIds}
-              onAddIcon={handleAddIcon}
-              onAddShape={handleAddShape}
-              onAddDivider={handleAddDivider}
-              onUploadCustomSvg={handleUploadCustomSvg}
-              onInsertTracedSymbol={handleInsertTracedSymbol}
-              onAddText={handleAddText}
-              onApplyFontPairing={handleApplyFontPairing}
-              onApplyFontToSelectedOrPrimary={handleApplyFontToSelectedOrPrimary}
-              onApplyPalette={handleApplyPalette}
-              onSwitchLayout={handleSwitchLayout}
-              onSwitchStyle={handleSwitchStyle}
-              onToggleLayerVisible={handleToggleLayerVisible}
-              onToggleLayerLock={handleToggleLayerLock}
-              onReorderLayer={handleReorderLayer}
-              onDuplicateLayer={handleDuplicateLayer}
-              onDeleteLayer={handleDeleteLayer}
-            />
-          </div>
-
-          <div className="order-1 lg:order-2 flex-1 flex flex-col min-w-0 min-h-[380px] sm:min-h-[460px] lg:min-h-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-[420px] lg:min-h-0">
             <LogoCanvasEditor
               doc={activeDoc}
               activePalette={activePalette}
@@ -1144,6 +1302,12 @@ export default function App() {
               onPreviewLayersChange={handlePreviewLayersChange}
               onCommitLayersChange={handleCommitLayersChange}
               onUpdateTextLive={handleUpdateTextLive}
+              onUpdateLayer={handleUpdateLayer}
+              onAlignSelectedLayers={handleAlignSelectedLayers}
+              onBatchUpdateSelected={handleBatchUpdateSelected}
+              onApplyFontPairing={handleApplyFontPairing}
+              onReorderLayer={handleReorderLayer}
+              onConvertTextToPath={handleConvertTextToPath}
               onUpdateDocBackground={(backgroundColor, transparentBackground) =>
                 commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
               }
@@ -1161,31 +1325,19 @@ export default function App() {
               }}
               onOpenWizard={() => setWizardOpen(true)}
               onSaveProject={() => handleSaveCurrentAsProject()}
+              onMagicRecolor={handleMagicRecolor}
+              onOpenVariations={handleOpenVariations}
+              onFixTextContrast={handleFixTextContrast}
               activeProjectName={activeProject?.name ?? null}
               autoSaveState={autoSaveState}
-            />
-          </div>
-
-          <div
-            className={`${
-              mobileEditorPanel === 'inspector' ? 'block' : 'hidden'
-            } lg:flex order-3 lg:order-3 min-w-0`}
-          >
-            <EditorInspector
-              doc={activeDoc}
-              activePalette={activePalette}
-              selectedLayers={selectedLayers}
-              onUpdateLayer={handleUpdateLayer}
-              onAlignSelectedLayers={handleAlignSelectedLayers}
-              onBatchUpdateSelected={handleBatchUpdateSelected}
-              onApplyFontPairing={handleApplyFontPairing}
-              onDuplicateSelected={handleDuplicateSelected}
-              onDeleteSelected={handleDeleteSelected}
-              onUpdateDocBackground={(backgroundColor, transparentBackground) =>
-                commitDocument({ ...activeDoc, backgroundColor, transparentBackground })
-              }
-              onReorderLayer={handleReorderLayer}
-              onConvertTextToPath={handleConvertTextToPath}
+              pages={pages.map((p, idx) => ({
+                id: p.id,
+                title: idx === activePageIndex ? activeDoc.title : p.title,
+              }))}
+              activePageIndex={activePageIndex}
+              onSwitchPage={handleSwitchPage}
+              onAddPage={handleAddPage}
+              onRemovePage={handleRemovePage}
             />
           </div>
         </main>
@@ -1282,6 +1434,21 @@ export default function App() {
         doc={activeDoc}
         brief={brief}
         palette={activePalette}
+        planTier={planTier}
+        onChangePlanTier={setPlanTier}
+      />
+
+      <VariationsModal
+        isOpen={variationsOpen}
+        variations={generatedVariations}
+        palette={activePalette}
+        onClose={() => setVariationsOpen(false)}
+        onOpenInEditor={(variationDoc) => {
+          commitDocument(variationDoc);
+          setSelectedLayerIds([]);
+          setViewMode('editor');
+        }}
+        onSaveAllToProjects={handleSaveFourVariationsToProjects}
       />
     </div>
   );

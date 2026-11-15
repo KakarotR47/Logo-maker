@@ -1,17 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Check,
+  Crown,
   Download,
   FileCode,
   FileText,
   Globe,
   Image as ImageIcon,
   Loader2,
+  Lock,
   Package,
   Share2,
   X,
 } from 'lucide-react';
 import { BrandBrief, ColorPalette, LogoDocument } from '../types/logo';
+import {
+  CheckoutProvider,
+  getConfiguredCheckoutUrl,
+  PLAN_ENTITLEMENTS,
+  PlanTier,
+} from '../types/monetization';
 import { extractBrandVariants } from '../utils/logoGenerator';
 import {
   computeProportionalDimensions,
@@ -32,9 +40,24 @@ interface ExportModalProps {
   doc: LogoDocument;
   brief: BrandBrief;
   palette: ColorPalette;
+  planTier?: PlanTier;
+  onChangePlanTier?: (tier: PlanTier) => void;
 }
 
 type PreviewTab = 'master' | 'avatar' | 'banner';
+
+const ProBadge: React.FC<{ locked?: boolean }> = ({ locked }) => (
+  <span
+    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+      locked
+        ? 'bg-[#141413] text-white'
+        : 'bg-[#1B4332]/12 text-[#1B4332]'
+    }`}
+  >
+    {locked ? <Lock className="h-2.5 w-2.5" /> : <Crown className="h-2.5 w-2.5" />}
+    Pro
+  </span>
+);
 
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
@@ -42,7 +65,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   doc,
   brief,
   palette,
+  planTier: controlledPlanTier,
+  onChangePlanTier,
 }) => {
+  const [internalPlanTier, setInternalPlanTier] = useState<PlanTier>('pro');
+  const planTier = controlledPlanTier ?? internalPlanTier;
+  const setPlanTier = (nextTier: PlanTier) => {
+    setInternalPlanTier(nextTier);
+    onChangePlanTier?.(nextTier);
+  };
+  const entitlements = PLAN_ENTITLEMENTS[planTier];
+  const isPro = planTier === 'pro';
+
+  const [upgradeFeatureLabel, setUpgradeFeatureLabel] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<CheckoutProvider>('stripe');
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const [previewTab, setPreviewTab] = useState<PreviewTab>('master');
   const [previewTransparent, setPreviewTransparent] = useState<boolean>(true);
   const [outlineText, setOutlineText] = useState<boolean>(true);
@@ -109,6 +146,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const hasAnySection = includeSvg || includePngs || includePdf || includeWebAndSocial;
 
+  const effectivePngSize: 1000 | 2000 | 4000 = isPro ? singlePngSize : 1000;
+  const effectivePngTransparent = isPro ? singlePngTransparent : false;
+  const effectiveSinglePngDims =
+    effectivePngSize === 1000 ? dims1000 : effectivePngSize === 2000 ? dims2000 : dims4000;
+
+  const requireProOrRun = (featureLabel: string, action: () => void) => {
+    if (!isPro) {
+      setUpgradeFeatureLabel(featureLabel);
+      setCheckoutNotice(null);
+      return;
+    }
+    setUpgradeFeatureLabel(null);
+    action();
+  };
+
   const runExport = async (key: string, fn: () => Promise<string>) => {
     try {
       setExportError(null);
@@ -128,20 +180,24 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const handleDownloadFullZip = () => {
     if (!hasAnySection) return;
-    void runExport('zip', async () => {
-      const result = await exportCompleteBrandZip(doc, brief, palette, {
-        includeSvg,
-        includePngs,
-        includePdf,
-        includeWebAndSocial,
-        outlineTextInSvg: outlineText,
-        cropSource,
-        solidBackgroundOverride: solidBg,
-        onProgress: (info) => setZipProgress(info),
+    requireProOrRun('Complete Brand Kit ZIP Archive', () => {
+      void runExport('zip', async () => {
+        const result = await exportCompleteBrandZip(doc, brief, palette, {
+          includeSvg,
+          includePngs,
+          includePdf,
+          includeWebAndSocial,
+          outlineTextInSvg: outlineText,
+          cropSource,
+          solidBackgroundOverride: solidBg,
+          onProgress: (info) => setZipProgress(info),
+        });
+        return `Packaged ${result.fileCount} brand assets into ${result.zipFileName}.`;
       });
-      return `Packaged ${result.fileCount} brand assets into ${result.zipFileName}.`;
     });
   };
+
+  const configuredCheckoutUrl = getConfiguredCheckoutUrl(selectedProvider);
 
   return (
     <div
@@ -154,8 +210,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       }}
     >
       <div className="w-full max-w-4xl max-h-[92vh] overflow-y-auto rounded-2xl border border-[#DCD9D0] bg-white p-5 sm:p-6 shadow-2xl">
-        {/* Modal Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-[#EAE7DF] pb-4">
+        {/* Modal Header + Free vs Pro Tier Toggle */}
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#EAE7DF] pb-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#1B4332]/10 text-[#1B4332]">
@@ -166,19 +222,162 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </h2>
             </div>
             <p className="mt-1 text-xs text-[#5C5951]">
-              Package scalable vector SVGs, 1000/2000/4000px solid &amp; transparent PNGs, print-ready PDF, web favicons (16/32/180px), and social profile crops into one ZIP.
+              {isPro
+                ? 'Pro Plan active: unlimited scalable SVGs, 4000px transparent PNGs, print PDF, favicons & full Brand Kit ZIP.'
+                : 'Free Plan: standard 1000px solid PNG included. Switch to Pro to unlock transparent high-res, SVG, PDF & Brand Kit ZIP.'}
             </p>
           </div>
-          <button
-            type="button"
-            disabled={busyKey !== null}
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[#5C5951] hover:bg-[#F3F1EB] hover:text-[#141413] cursor-pointer disabled:opacity-40"
-            aria-label="Close export modal"
-          >
-            <X className="h-4 w-4" />
-          </button>
+
+          <div className="flex items-center gap-2.5">
+            {/* Free vs. Pro Tier Toggle */}
+            <div
+              className="inline-flex items-center rounded-lg border border-[#DCD9D0] bg-[#FAF9F6] p-0.5"
+              role="group"
+              aria-label="Export plan tier"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setPlanTier('free');
+                  setUpgradeFeatureLabel(null);
+                }}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  planTier === 'free'
+                    ? 'bg-white text-[#141413] shadow-xs'
+                    : 'text-[#5C5951] hover:text-[#141413]'
+                }`}
+              >
+                Free Plan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPlanTier('pro');
+                  setUpgradeFeatureLabel(null);
+                  setCheckoutNotice(null);
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  planTier === 'pro'
+                    ? 'bg-[#141413] text-white shadow-xs'
+                    : 'text-[#5C5951] hover:text-[#141413]'
+                }`}
+              >
+                <Crown className="h-3 w-3" />
+                Pro Plan
+              </button>
+            </div>
+
+            <button
+              type="button"
+              disabled={busyKey !== null}
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-[#5C5951] hover:bg-[#F3F1EB] hover:text-[#141413] cursor-pointer disabled:opacity-40"
+              aria-label="Close export modal"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
+
+        {/* Inline Pro Upgrade Prompt Card (Ready for Stripe / LemonSqueezy Integration) */}
+        {!isPro && upgradeFeatureLabel && (
+          <div className="mt-4 rounded-xl border border-[#141413] bg-[#FAF9F6] p-4 space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <ProBadge locked />
+                  <h3 className="text-sm font-bold text-[#141413]">
+                    {upgradeFeatureLabel} requires Forma Pro
+                  </h3>
+                </div>
+                <p className="text-xs text-[#5C5951]">
+                  One-time upgrade ({entitlements.priceDisplay} in Pro: {PLAN_ENTITLEMENTS.pro.priceDisplay}) unlocks scalable SVG vectors, transparent 2000px/4000px PNGs, 2-page Print PDF, and complete Brand Kit ZIPs.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUpgradeFeatureLabel(null)}
+                className="text-xs text-[#5C5951] hover:text-[#141413] cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E6E3DA] pt-3">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-medium text-[#5C5951]">Checkout provider:</span>
+                {(['stripe', 'lemonsqueezy'] as const).map((prov) => (
+                  <button
+                    key={prov}
+                    type="button"
+                    onClick={() => {
+                      setSelectedProvider(prov);
+                      setCheckoutNotice(null);
+                    }}
+                    className={`rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer ${
+                      selectedProvider === prov
+                        ? 'border-[#141413] bg-white text-[#141413]'
+                        : 'border-transparent text-[#5C5951] hover:text-[#141413]'
+                    }`}
+                  >
+                    {prov === 'stripe' ? 'Stripe' : 'LemonSqueezy'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {configuredCheckoutUrl ? (
+                  <a
+                    href={configuredCheckoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#1B4332] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#143326]"
+                  >
+                    <Crown className="h-3.5 w-3.5" />
+                    Continue to {selectedProvider === 'stripe' ? 'Stripe' : 'LemonSqueezy'} Checkout
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCheckoutNotice(
+                        `Ready for ${
+                          selectedProvider === 'stripe' ? 'Stripe' : 'LemonSqueezy'
+                        }: set ${
+                          selectedProvider === 'stripe'
+                            ? 'VITE_STRIPE_CHECKOUT_URL'
+                            : 'VITE_LEMONSQUEEZY_CHECKOUT_URL'
+                        } in your environment to route live payments, or click "Preview Pro Mode".`
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#141413] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#2A2926] cursor-pointer"
+                  >
+                    <Crown className="h-3.5 w-3.5" />
+                    Upgrade via {selectedProvider === 'stripe' ? 'Stripe' : 'LemonSqueezy'}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlanTier('pro');
+                    setUpgradeFeatureLabel(null);
+                    setCheckoutNotice(null);
+                  }}
+                  className="rounded-lg border border-[#DCD9D0] bg-white px-3 py-2 text-xs font-semibold text-[#141413] hover:border-[#141413] cursor-pointer"
+                >
+                  Preview Pro Mode
+                </button>
+              </div>
+            </div>
+
+            {checkoutNotice && (
+              <p className="rounded-lg border border-[#DCD9D0] bg-white px-3 py-2 text-[11px] text-[#3F3E39]">
+                {checkoutNotice}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Status Feedback */}
         {exportError && (
@@ -422,9 +621,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <div className="rounded-2xl border border-[#1B4332]/30 bg-[#FAF9F6] p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-bold text-[#141413]">
-                    Complete Brand Archive (.zip)
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-[#141413]">
+                      Complete Brand Kit Archive (.zip)
+                    </h3>
+                    <ProBadge locked={!isPro} />
+                  </div>
                   <p className="text-[11px] text-[#5C5951]">
                     Select deliverable folders to package into a single organized download.
                   </p>
@@ -557,10 +759,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Packaging Multi-Format ZIP...
                   </>
-                ) : (
+                ) : isPro ? (
                   <>
                     <Download className="h-4 w-4" />
                     Download Complete Brand ZIP ({totalSelectedFiles} files)
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    Unlock Complete Brand Kit ZIP ({totalSelectedFiles} files)
                   </>
                 )}
               </button>
@@ -573,10 +780,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </p>
 
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                {/* Single SVG */}
+                {/* Single SVG (PRO) */}
                 <div className="rounded-xl border border-[#DCD9D0] bg-[#FAF9F6] p-3 flex flex-col justify-between gap-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[#141413]">Vector SVG</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-[#141413]">Vector SVG</span>
+                      <ProBadge locked={!isPro} />
+                    </div>
                     <div className="inline-flex rounded-md border border-[#DCD9D0] bg-white p-0.5 text-[10px]">
                       <button
                         type="button"
@@ -602,52 +812,78 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     type="button"
                     disabled={busyKey !== null}
                     onClick={() =>
-                      runExport('svg', async () => {
-                        await exportLogoSvg(doc, {
-                          transparentBackground: singleSvgTransparent,
-                          outlineText,
-                          forceBackground: singleSvgTransparent ? 'transparent' : solidBg,
+                      requireProOrRun('Scalable Vector SVG Export', () => {
+                        void runExport('svg', async () => {
+                          await exportLogoSvg(doc, {
+                            transparentBackground: singleSvgTransparent,
+                            outlineText,
+                            forceBackground: singleSvgTransparent ? 'transparent' : solidBg,
+                          });
+                          return 'Clean scalable SVG downloaded.';
                         });
-                        return 'Clean scalable SVG downloaded.';
                       })
                     }
                     className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-[#DCD9D0] bg-white px-3 py-1.5 text-xs font-semibold text-[#141413] hover:border-[#141413] transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <FileCode className="h-3.5 w-3.5 text-[#1B4332]" />
+                    {isPro ? (
+                      <FileCode className="h-3.5 w-3.5 text-[#1B4332]" />
+                    ) : (
+                      <Lock className="h-3.5 w-3.5 text-[#5C5951]" />
+                    )}
                     {busyKey === 'svg' ? 'Saving...' : 'Download SVG'}
                   </button>
                 </div>
 
-                {/* Single High-Res PNG */}
+                {/* PNG Export (1000px Solid FREE; Transparent & 2000/4000px PRO) */}
                 <div className="rounded-xl border border-[#DCD9D0] bg-[#FAF9F6] p-3 flex flex-col justify-between gap-2.5">
                   <div className="flex items-center justify-between gap-1.5">
-                    <select
-                      aria-label="PNG width resolution"
-                      value={singlePngSize}
-                      onChange={(e) =>
-                        setSinglePngSize(Number(e.target.value) as 1000 | 2000 | 4000)
-                      }
-                      className="rounded-md border border-[#DCD9D0] bg-white px-1.5 py-0.5 text-[11px] font-mono-num font-semibold text-[#141413]"
-                    >
-                      <option value={1000}>1000px</option>
-                      <option value={2000}>2000px</option>
-                      <option value={4000}>4000px</option>
-                    </select>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        aria-label="PNG width resolution"
+                        value={effectivePngSize}
+                        onChange={(e) => {
+                          const nextVal = Number(e.target.value) as 1000 | 2000 | 4000;
+                          if (nextVal > 1000 && !isPro) {
+                            setUpgradeFeatureLabel(`${nextVal}px High-Resolution PNG Export`);
+                            return;
+                          }
+                          setSinglePngSize(nextVal);
+                        }}
+                        className="rounded-md border border-[#DCD9D0] bg-white px-1.5 py-0.5 text-[11px] font-mono-num font-semibold text-[#141413]"
+                      >
+                        <option value={1000}>1000px (Free)</option>
+                        <option value={2000}>2000px (Pro)</option>
+                        <option value={4000}>4000px (Pro)</option>
+                      </select>
+                      {!isPro ? (
+                        <span className="rounded bg-[#1B4332]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#1B4332]">
+                          Free
+                        </span>
+                      ) : (
+                        <ProBadge />
+                      )}
+                    </div>
                     <div className="inline-flex rounded-md border border-[#DCD9D0] bg-white p-0.5 text-[10px]">
                       <button
                         type="button"
-                        onClick={() => setSinglePngTransparent(true)}
+                        onClick={() => {
+                          if (!isPro) {
+                            setUpgradeFeatureLabel('Transparent Alpha PNG Export');
+                            return;
+                          }
+                          setSinglePngTransparent(true);
+                        }}
                         className={`rounded-xs px-1.5 py-0.5 font-semibold cursor-pointer ${
-                          singlePngTransparent ? 'bg-[#141413] text-white' : 'text-[#5C5951]'
+                          effectivePngTransparent ? 'bg-[#141413] text-white' : 'text-[#5C5951]'
                         }`}
                       >
-                        Alpha
+                        Alpha{!isPro ? ' (Pro)' : ''}
                       </button>
                       <button
                         type="button"
                         onClick={() => setSinglePngTransparent(false)}
                         className={`rounded-xs px-1.5 py-0.5 font-semibold cursor-pointer ${
-                          !singlePngTransparent ? 'bg-[#141413] text-white' : 'text-[#5C5951]'
+                          !effectivePngTransparent ? 'bg-[#141413] text-white' : 'text-[#5C5951]'
                         }`}
                       >
                         Solid
@@ -659,11 +895,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     disabled={busyKey !== null}
                     onClick={() =>
                       runExport('png', async () => {
-                        await exportLogoPng(doc, 1, singlePngTransparent, {
-                          targetLongEdge: singlePngSize,
+                        await exportLogoPng(doc, 1, effectivePngTransparent, {
+                          targetLongEdge: effectivePngSize,
                           palette,
                         });
-                        return `Downloaded ${singlePngDims.width}×${singlePngDims.height} PNG.`;
+                        return `Downloaded ${effectiveSinglePngDims.width}×${effectiveSinglePngDims.height} ${
+                          effectivePngTransparent ? 'transparent' : 'solid'
+                        } PNG.`;
                       })
                     }
                     className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-[#DCD9D0] bg-white px-3 py-1.5 text-xs font-semibold text-[#141413] hover:border-[#141413] transition-colors cursor-pointer disabled:opacity-50"
@@ -671,44 +909,66 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     <ImageIcon className="h-3.5 w-3.5 text-[#1B4332]" />
                     {busyKey === 'png'
                       ? 'Rendering...'
-                      : `PNG (${singlePngDims.width}×${singlePngDims.height})`}
+                      : `PNG (${effectiveSinglePngDims.width}×${effectiveSinglePngDims.height})`}
                   </button>
                 </div>
 
-                {/* Print PDF */}
+                {/* Print PDF (PRO) */}
                 <button
                   type="button"
                   disabled={busyKey !== null}
                   onClick={() =>
-                    runExport('pdf', async () => {
-                      await exportLogoPdf(doc, palette, brief);
-                      return '2-page print-ready PDF proof downloaded.';
+                    requireProOrRun('Print-Ready Master PDF', () => {
+                      void runExport('pdf', async () => {
+                        await exportLogoPdf(doc, palette, brief);
+                        return '2-page print-ready PDF proof downloaded.';
+                      });
                     })
                   }
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#DCD9D0] bg-[#FAF9F6] px-3 py-2.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-between gap-2 rounded-xl border border-[#DCD9D0] bg-[#FAF9F6] px-3 py-2.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <FileText className="h-3.5 w-3.5 text-[#1B4332]" />
-                  {busyKey === 'pdf' ? 'Building PDF...' : 'Print-Ready PDF'}
+                  <span className="inline-flex items-center gap-1.5">
+                    {isPro ? (
+                      <FileText className="h-3.5 w-3.5 text-[#1B4332]" />
+                    ) : (
+                      <Lock className="h-3.5 w-3.5 text-[#5C5951]" />
+                    )}
+                    {busyKey === 'pdf' ? 'Building PDF...' : 'Print-Ready PDF'}
+                  </span>
+                  <ProBadge locked={!isPro} />
                 </button>
 
-                {/* Web Favicon + Social ZIP */}
+                {/* Web Favicon + Social ZIP (PRO) */}
                 <button
                   type="button"
                   disabled={busyKey !== null}
                   onClick={() =>
-                    runExport('web-social', async () => {
-                      await exportFaviconPackage(activeCropDoc, brief.businessName || doc.title, {
-                        fullDoc: doc,
-                        palette,
-                        includeSocialCrops: true,
+                    requireProOrRun('Favicons & Social Crops Bundle', () => {
+                      void runExport('web-social', async () => {
+                        await exportFaviconPackage(
+                          activeCropDoc,
+                          brief.businessName || doc.title,
+                          {
+                            fullDoc: doc,
+                            palette,
+                            includeSocialCrops: true,
+                          }
+                        );
+                        return 'Web favicons & social media crops ZIP downloaded.';
                       });
-                      return 'Web favicons & social media crops ZIP downloaded.';
                     })
                   }
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#DCD9D0] bg-[#FAF9F6] px-3 py-2.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center justify-between gap-2 rounded-xl border border-[#DCD9D0] bg-[#FAF9F6] px-3 py-2.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-white transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <Share2 className="h-3.5 w-3.5 text-[#1B4332]" />
-                  {busyKey === 'web-social' ? 'Packaging...' : 'Favicons & Social (.zip)'}
+                  <span className="inline-flex items-center gap-1.5">
+                    {isPro ? (
+                      <Share2 className="h-3.5 w-3.5 text-[#1B4332]" />
+                    ) : (
+                      <Lock className="h-3.5 w-3.5 text-[#5C5951]" />
+                    )}
+                    {busyKey === 'web-social' ? 'Packaging...' : 'Favicons & Social (.zip)'}
+                  </span>
+                  <ProBadge locked={!isPro} />
                 </button>
               </div>
             </div>

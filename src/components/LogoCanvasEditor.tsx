@@ -1,19 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   BookmarkCheck,
-  CreditCard,
+  CheckCircle2,
   FolderPlus,
   Grid3x3,
   Maximize2,
-  Redo2,
+  Plus,
   RotateCcw,
-  Undo2,
-  Wand2,
+  Scan,
+  X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { ColorPalette, LogoDocument, LogoLayer, TextLayer } from '../types/logo';
+import {
+  ColorPalette,
+  FontPairing,
+  LogoDocument,
+  LogoLayer,
+  TextLayer,
+} from '../types/logo';
+import {
+  analyzeDocumentContrast,
+  checkSafeZoneViolations,
+} from '../utils/contrastChecker';
 import { CanvasLayerNode } from './CanvasLayerRenderer';
+import { FloatingContextToolbar } from './FloatingContextToolbar';
 
 interface SnapGuide {
   axis: 'x' | 'y';
@@ -49,6 +61,14 @@ interface LogoCanvasEditorProps {
     afterMap: Record<string, LogoLayer>
   ) => void;
   onUpdateTextLive: (layerId: string, text: string) => void;
+  onUpdateLayer: (updated: LogoLayer) => void;
+  onAlignSelectedLayers: (
+    mode: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom'
+  ) => void;
+  onBatchUpdateSelected: (patch: Partial<LogoLayer>) => void;
+  onApplyFontPairing: (pairing: FontPairing) => void;
+  onReorderLayer: (id: string, dir: 'up' | 'down') => void;
+  onConvertTextToPath: (layer: TextLayer) => Promise<void>;
   onUpdateDocBackground: (bg: string, transparent: boolean) => void;
   onResizeArtboard: (width: number, height: number) => void;
   canUndo: boolean;
@@ -61,8 +81,16 @@ interface LogoCanvasEditorProps {
   onSendToVisitingCard: () => void;
   onOpenWizard: () => void;
   onSaveProject?: () => void;
+  onMagicRecolor?: () => void;
+  onOpenVariations?: () => void;
+  onFixTextContrast?: (layerId: string, suggestedHex: string) => void;
   activeProjectName?: string | null;
   autoSaveState?: 'saved' | 'saving';
+  pages: Array<{ id: string; title: string }>;
+  activePageIndex: number;
+  onSwitchPage: (index: number) => void;
+  onAddPage: () => void;
+  onRemovePage: (index: number) => void;
 }
 
 export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
@@ -73,6 +101,12 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onPreviewLayersChange,
   onCommitLayersChange,
   onUpdateTextLive,
+  onUpdateLayer,
+  onAlignSelectedLayers,
+  onBatchUpdateSelected,
+  onApplyFontPairing,
+  onReorderLayer,
+  onConvertTextToPath,
   onUpdateDocBackground,
   onResizeArtboard,
   canUndo,
@@ -85,12 +119,21 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onSendToVisitingCard,
   onOpenWizard,
   onSaveProject,
+  onMagicRecolor,
+  onOpenVariations,
+  onFixTextContrast,
   activeProjectName,
   autoSaveState = 'saved',
+  pages,
+  activePageIndex,
+  onSwitchPage,
+  onAddPage,
+  onRemovePage,
 }) => {
   const [zoom, setZoom] = useState<number>(1);
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
+  const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [marquee, setMarquee] = useState<MarqueeBox | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -167,6 +210,16 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   }, [selectedLayers]);
 
   const singleSelected = selectedLayers.length === 1 ? selectedLayers[0] : null;
+
+  const contrastReport = useMemo(
+    () => analyzeDocumentContrast(doc, activePalette),
+    [doc, activePalette]
+  );
+
+  const safeZoneReport = useMemo(
+    () => (showSafeZone ? checkSafeZoneViolations(doc, 0.08) : null),
+    [doc, showSafeZone]
+  );
 
   const computeFitZoom = useCallback(
     (containerW: number) => {
@@ -693,200 +746,37 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
 
   const scaledW = Math.round(doc.width * zoom);
   const scaledH = Math.round(doc.height * zoom);
-  const bgSwatches = ['#FFFFFF', '#F4F1DE', '#141413', activePalette.primary];
 
   return (
-    <div className="flex flex-1 flex-col min-w-0 bg-[#ECEAE4]">
-      {/* Canvas Top Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 border-b border-[#DCD9D0] bg-[#FAF9F6] px-3 sm:px-4 py-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onUndo}
-            disabled={!canUndo}
-            title="Undo (Ctrl/Cmd+Z)"
-            className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-[#141413] hover:bg-[#F2F0EA] disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Undo2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Undo</span>
-          </button>
-          <button
-            type="button"
-            onClick={onRedo}
-            disabled={!canRedo}
-            title="Redo (Ctrl/Cmd+Shift+Z)"
-            className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 sm:px-2.5 py-1.5 text-xs font-medium text-[#141413] hover:bg-[#F2F0EA] disabled:opacity-40 cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Redo2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Redo</span>
-          </button>
-
-          <span className="mx-0.5 hidden sm:inline h-4 w-px bg-[#DCD9D0]" aria-hidden="true" />
-
-          <button
-            type="button"
-            onClick={() => setShowGrid((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2 sm:px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              showGrid
-                ? 'border-[#141413] bg-[#141413] text-white'
-                : 'border-[#DCD9D0] bg-white text-[#3F3E39] hover:bg-[#F2F0EA]'
-            }`}
-          >
-            <Grid3x3 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Grid</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSnapEnabled((v) => !v)}
-            className={`inline-flex items-center gap-1.5 rounded-md border px-2 sm:px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              snapEnabled
-                ? 'border-[#1B4332] bg-[#1B4332] text-white'
-                : 'border-[#DCD9D0] bg-white text-[#3F3E39] hover:bg-[#F2F0EA]'
-            }`}
-          >
-            Snap
-          </button>
-
-          <span className="mx-0.5 hidden sm:inline h-4 w-px bg-[#DCD9D0]" aria-hidden="true" />
-
-          {/* Artboard Background Color Switcher */}
-          <div className="flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2 py-1">
-            <span className="hidden md:inline text-[11px] font-medium text-[#5C5951]">Canvas:</span>
-            {bgSwatches.map((hex) => (
-              <button
-                key={hex}
-                type="button"
-                onClick={() => onUpdateDocBackground(hex, false)}
-                className={`h-4 w-4 rounded-sm border cursor-pointer ${
-                  !doc.transparentBackground &&
-                  doc.backgroundColor.toLowerCase() === hex.toLowerCase()
-                    ? 'ring-2 ring-[#2563EB] ring-offset-1 border-black/30'
-                    : 'border-black/20'
-                }`}
-                style={{ backgroundColor: hex }}
-                title={`Background ${hex}`}
-              />
-            ))}
-            <input
-              type="color"
-              value={doc.backgroundColor}
-              onChange={(e) => onUpdateDocBackground(e.target.value, false)}
-              aria-label="Custom artboard background color"
-              className="h-4 w-5 cursor-pointer border-0 bg-transparent p-0"
-            />
-            <button
-              type="button"
-              onClick={() =>
-                onUpdateDocBackground(doc.backgroundColor, !doc.transparentBackground)
-              }
-              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer ${
-                doc.transparentBackground
-                  ? 'bg-[#141413] text-white'
-                  : 'bg-[#F2F0EA] text-[#3F3E39] hover:bg-[#E4E1D7]'
-              }`}
-              title="Toggle transparent canvas"
-            >
-              Clear
-            </button>
-          </div>
-
-          <select
-            value={`${doc.width}x${doc.height}`}
-            onChange={(e) => {
-              const [w, h] = e.target.value.split('x').map(Number);
-              userAdjustedZoomRef.current = false;
-              onResizeArtboard(w, h);
-            }}
-            aria-label="Artboard size preset"
-            className="rounded-md border border-[#DCD9D0] bg-white px-2 py-1.5 text-[11px] font-medium text-[#141413] cursor-pointer"
-          >
-            <option value="800x600">Logo 800×600</option>
-            <option value="800x800">Square 800×800</option>
-            <option value="1050x600">Card 1050×600</option>
-          </select>
-        </div>
-
-        {/* Right Toolbar: Save Project + Wizard + Card + Zoom */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-          {onSaveProject && (
-            <button
-              type="button"
-              onClick={onSaveProject}
-              title={
-                activeProjectName
-                  ? `Auto-saving "${activeProjectName}" (Click to snapshot a new copy)`
-                  : 'Save logo to My Projects'
-              }
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-[#F2F0EA] transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              {activeProjectName ? (
-                <BookmarkCheck className="h-3.5 w-3.5 text-[#1B4332]" />
-              ) : (
-                <FolderPlus className="h-3.5 w-3.5 text-[#1B4332]" />
-              )}
-              <span className="hidden sm:inline">
-                {activeProjectName ? 'Save Copy' : 'Save Project'}
-              </span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={onOpenWizard}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#DCD9D0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#141413] hover:border-[#141413] hover:bg-[#F2F0EA] transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Wand2 className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">Logo Wizard</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onSendToVisitingCard}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#1B4332] bg-[#1B4332]/10 px-2.5 py-1.5 text-xs font-semibold text-[#1B4332] hover:bg-[#1B4332] hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <CreditCard className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">Put Logo on Card</span>
-            <span className="xl:hidden">Card</span>
-          </button>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => {
-                userAdjustedZoomRef.current = true;
-                setZoom((z) => Math.max(0.28, +(z - 0.12).toFixed(2)));
-              }}
-              className="rounded-md border border-[#DCD9D0] bg-white p-1.5 text-[#141413] hover:bg-[#F2F0EA] cursor-pointer"
-              aria-label="Zoom out"
-            >
-              <ZoomOut className="h-3.5 w-3.5" />
-            </button>
-            <span className="font-mono-num w-10 text-center text-xs font-semibold text-[#141413]">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                userAdjustedZoomRef.current = true;
-                setZoom((z) => Math.min(2.2, +(z + 0.12).toFixed(2)));
-              }}
-              className="rounded-md border border-[#DCD9D0] bg-white p-1.5 text-[#141413] hover:bg-[#F2F0EA] cursor-pointer"
-              aria-label="Zoom in"
-            >
-              <ZoomIn className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={handleFitZoom}
-              className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 py-1.5 text-[11px] font-medium text-[#3F3E39] hover:bg-[#F2F0EA] cursor-pointer whitespace-nowrap shrink-0"
-              title="Fit artboard to viewport"
-            >
-              <Maximize2 className="h-3 w-3" />
-              Fit
-            </button>
-          </div>
-        </div>
+    <div className="flex flex-1 flex-col min-w-0 bg-[#F1F5F9] dark:bg-[#0B0D14] transition-colors">
+      {/* Floating Contextual Top Bar right above the Artboard */}
+      <div className="px-3 sm:px-5 pt-3 pb-1 shrink-0 z-30">
+        <FloatingContextToolbar
+          doc={doc}
+          activePalette={activePalette}
+          selectedLayers={selectedLayers}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={onUndo}
+          onRedo={onRedo}
+          onUpdateLayer={onUpdateLayer}
+          onAlignSelectedLayers={onAlignSelectedLayers}
+          onBatchUpdateSelected={onBatchUpdateSelected}
+          onApplyFontPairing={onApplyFontPairing}
+          onDuplicateSelected={onDuplicateSelected}
+          onDeleteSelected={onDeleteSelected}
+          onUpdateDocBackground={onUpdateDocBackground}
+          onResizeArtboard={(w, h) => {
+            userAdjustedZoomRef.current = false;
+            onResizeArtboard(w, h);
+          }}
+          onReorderLayer={onReorderLayer}
+          onConvertTextToPath={onConvertTextToPath}
+          onMagicRecolor={onMagicRecolor}
+          onOpenVariations={onOpenVariations}
+          onOpenWizard={onOpenWizard}
+          onSendToVisitingCard={onSendToVisitingCard}
+        />
       </div>
 
       {/* Scrollable Workspace Viewport */}
@@ -901,7 +791,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         }}
       >
         <div
-          className="relative shrink-0 shadow-[0_12px_40px_rgba(17,24,39,0.12)] ring-1 ring-black/10"
+          className="relative shrink-0 shadow-[0_14px_42px_rgba(15,23,42,0.14)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.55)] ring-1 ring-[#E2E8F0] dark:ring-[#2A2D3D]"
           style={{
             width: scaledW,
             height: scaledH,
@@ -972,6 +862,72 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 />
               </g>
             ))}
+
+            {/* Toggleable Safe-Zone & Bleed Margin Overlay */}
+            {showSafeZone && safeZoneReport && (() => {
+              const mx = safeZoneReport.marginX;
+              const my = safeZoneReport.marginY;
+              const sw = doc.width - mx * 2;
+              const sh = doc.height - my * 2;
+              const hasClips = safeZoneReport.violatingLayerIds.length > 0;
+              const zoneColor = hasClips ? '#D97706' : '#0D9488';
+              const tickLen = Math.max(12, Math.min(24, Math.round(doc.width * 0.025)));
+
+              return (
+                <g pointerEvents="none">
+                  {/* Outer safe-margin shading band */}
+                  <path
+                    d={`M 0 0 H ${doc.width} V ${doc.height} H 0 Z M ${mx} ${my} V ${my + sh} H ${mx + sw} V ${my} Z`}
+                    fill={zoneColor}
+                    fillOpacity={0.07}
+                    fillRule="evenodd"
+                  />
+                  {/* Safe margin dashed frame */}
+                  <rect
+                    x={mx}
+                    y={my}
+                    width={sw}
+                    height={sh}
+                    fill="none"
+                    stroke={zoneColor}
+                    strokeWidth={1.5 / zoom}
+                    strokeDasharray="6 4"
+                  />
+                  {/* Corner registration brackets */}
+                  <path
+                    d={`M ${mx} ${my + tickLen} V ${my} H ${mx + tickLen}
+                        M ${mx + sw - tickLen} ${my} H ${mx + sw} V ${my + tickLen}
+                        M ${mx} ${my + sh - tickLen} V ${my + sh} H ${mx + tickLen}
+                        M ${mx + sw - tickLen} ${my + sh} H ${mx + sw} V ${my + sh - tickLen}`}
+                    fill="none"
+                    stroke={zoneColor}
+                    strokeWidth={2.2 / zoom}
+                  />
+                  {/* Label tag inside top-left safe margin */}
+                  <rect
+                    x={mx + 8}
+                    y={my + 8}
+                    width={hasClips ? 236 : 162}
+                    height={22}
+                    rx={4}
+                    fill={zoneColor}
+                    fillOpacity={0.92}
+                  />
+                  <text
+                    x={mx + 16}
+                    y={my + 22.5}
+                    fill="#FFFFFF"
+                    fontSize={10.5}
+                    fontWeight={700}
+                    fontFamily="'JetBrains Mono', monospace"
+                  >
+                    {hasClips
+                      ? `SAFE ZONE · ${safeZoneReport.violatingLayerIds.length} LAYER CLIPPING`
+                      : 'SAFE MARGIN (8% INSET)'}
+                  </text>
+                </g>
+              );
+            })()}
 
             {/* Smart Alignment Snap Guides */}
             {snapGuides.map((g, i) =>
@@ -1179,37 +1135,238 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         </div>
       </div>
 
-      {/* Helpful Canvas Hint & Auto-Save Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#DCD9D0] bg-[#FAF9F6] px-3 sm:px-4 py-1.5 text-[11px] text-[#5C5951]">
-        <span className="hidden md:inline">
-          Drag empty canvas for multi-select · Shift+Click layers · Ctrl+D duplicate · Ctrl+Z undo · Del delete
-        </span>
-        <span className="md:hidden">
-          Tap layer to edit · Drag handles to resize · Double-tap text
-        </span>
-        <div className="flex items-center gap-3 font-mono-num ml-auto">
-          <span className="text-[#1B4332]">
-            {autoSaveState === 'saving'
-              ? 'Saving...'
-              : activeProjectName
-                ? `${activeProjectName} · Saved`
-                : 'Draft auto-saved'}
-          </span>
-          <span>
-            {selectedLayerIds.length > 1
-              ? `${selectedLayerIds.length} selected`
-              : `${doc.width} × ${doc.height} px`}
-          </span>
+      {/* Bottom Zoom & Page-Switcher Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822] px-3 sm:px-4 py-2 text-xs">
+        {/* Left: Multi-Page Switcher & Project Snapshot */}
+        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full">
+          {pages.map((p, idx) => {
+            const active = idx === activePageIndex;
+            return (
+              <div
+                key={p.id}
+                className={`inline-flex items-center gap-1 rounded-full border pl-2.5 pr-1.5 py-1 text-[11px] font-semibold transition-colors shrink-0 ${
+                  active
+                    ? 'border-[#1B4332] bg-[#1B4332]/10 text-[#1B4332] dark:border-emerald-500 dark:bg-emerald-500/15 dark:text-emerald-300'
+                    : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] text-slate-600 dark:text-slate-300 hover:border-slate-400'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => onSwitchPage(idx)}
+                  className="cursor-pointer whitespace-nowrap"
+                >
+                  Page {idx + 1}
+                </button>
+                {pages.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => onRemovePage(idx)}
+                    title={`Delete Page ${idx + 1}`}
+                    className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={onAddPage}
+            title="Duplicate current artboard as a new page"
+            className="inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-emerald-600 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Plus className="h-3 w-3" />
+            <span className="hidden sm:inline">Add Page</span>
+          </button>
+
+          {onSaveProject && (
+            <button
+              type="button"
+              onClick={onSaveProject}
+              title={
+                activeProjectName
+                  ? `Auto-saving "${activeProjectName}" (Click to save a new snapshot copy)`
+                  : 'Save logo to My Projects'
+              }
+              className="hidden md:inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-emerald-600 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {activeProjectName ? (
+                <BookmarkCheck className="h-3 w-3 text-[#1B4332] dark:text-emerald-400" />
+              ) : (
+                <FolderPlus className="h-3 w-3 text-[#1B4332] dark:text-emerald-400" />
+              )}
+              <span>
+                {autoSaveState === 'saving'
+                  ? 'Saving...'
+                  : activeProjectName
+                    ? 'Save Copy'
+                    : 'Save Project'}
+              </span>
+            </button>
+          )}
+        </div>
+
+        {/* Center/Right: Grid, Snap, Safe Zone, Contrast Status, and Zoom Slider */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 ml-auto">
+          <button
+            type="button"
+            onClick={() => setShowGrid((v) => !v)}
+            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+              showGrid
+                ? 'border-slate-900 bg-slate-900 text-white dark:border-emerald-500 dark:bg-emerald-600'
+                : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Grid3x3 className="h-3 w-3" />
+            <span className="hidden sm:inline">Grid</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSnapEnabled((v) => !v)}
+            className={`inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+              snapEnabled
+                ? 'border-[#1B4332] bg-[#1B4332] text-white dark:border-emerald-500 dark:bg-emerald-600'
+                : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            Snap
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowSafeZone((v) => !v)}
+            title="Toggle 8% safe-margin overlay"
+            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+              showSafeZone
+                ? 'border-teal-700 bg-teal-700 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Scan className="h-3 w-3" />
+            <span className="hidden md:inline">Safe Zone</span>
+          </button>
+
+          {contrastReport.checkedCount > 0 && (
+            <div
+              className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10.5px] font-semibold whitespace-nowrap shrink-0 ${
+                contrastReport.hasCritical
+                  ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300'
+                  : contrastReport.hasWarning
+                    ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300'
+                    : 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300'
+              }`}
+              title={
+                contrastReport.hasWarning
+                  ? `"${contrastReport.worstLayerName}" contrast is ${contrastReport.worstRatio.toFixed(
+                      2
+                    )}:1 against ${contrastReport.worstBgHex} (WCAG AA recommends ≥ 4.5:1)`
+                  : `All text layers meet WCAG contrast (${contrastReport.worstRatio.toFixed(2)}:1)`
+              }
+            >
+              {contrastReport.hasWarning ? (
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+              ) : (
+                <CheckCircle2 className="h-3 w-3 shrink-0" />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (contrastReport.worstLayerId) {
+                    onSelectLayers([contrastReport.worstLayerId]);
+                  }
+                }}
+                className="cursor-pointer hover:underline"
+              >
+                {contrastReport.hasWarning
+                  ? `${contrastReport.worstRatio.toFixed(1)}:1`
+                  : `WCAG ${contrastReport.worstRatio.toFixed(1)}:1`}
+              </button>
+              {contrastReport.hasWarning &&
+                contrastReport.worstLayerId &&
+                contrastReport.suggestedFixHex &&
+                onFixTextContrast && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onFixTextContrast(
+                        contrastReport.worstLayerId!,
+                        contrastReport.suggestedFixHex!
+                      )
+                    }
+                    className="rounded bg-white/90 dark:bg-slate-900 px-1.5 py-0.5 text-[9.5px] font-bold text-slate-900 dark:text-white ring-1 ring-black/15 cursor-pointer"
+                  >
+                    Fix
+                  </button>
+                )}
+            </div>
+          )}
+
           {selectedLayerIds.length > 0 && (
             <button
               type="button"
               onClick={() => onSelectLayers([])}
-              className="inline-flex items-center gap-1 text-[#141413] hover:underline cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] px-2 py-1 text-[10.5px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
             >
               <RotateCcw className="h-3 w-3" />
               Deselect
             </button>
           )}
+
+          <span className="hidden sm:inline h-4 w-px bg-[#E2E8F0] dark:bg-[#2A2D3D]" aria-hidden="true" />
+
+          {/* Zoom Controls */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                userAdjustedZoomRef.current = true;
+                setZoom((z) => Math.max(0.28, +(z - 0.12).toFixed(2)));
+              }}
+              className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+              aria-label="Zoom out"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+            <input
+              type="range"
+              min={0.28}
+              max={2.2}
+              step={0.04}
+              value={zoom}
+              onChange={(e) => {
+                userAdjustedZoomRef.current = true;
+                setZoom(Number(e.target.value));
+              }}
+              aria-label="Canvas zoom slider"
+              className="hidden sm:block w-20 accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+            />
+            <span className="font-mono-num w-10 text-center text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                userAdjustedZoomRef.current = true;
+                setZoom((z) => Math.min(2.2, +(z + 0.12).toFixed(2)));
+              }}
+              className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+              aria-label="Zoom in"
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={handleFitZoom}
+              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2 py-1 text-[10.5px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer whitespace-nowrap shrink-0"
+              title="Fit artboard to viewport"
+            >
+              <Maximize2 className="h-3 w-3" />
+              Fit
+            </button>
+          </div>
         </div>
       </div>
     </div>

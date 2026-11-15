@@ -230,7 +230,7 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
     <div className="space-y-4">
       <div>
         <div className="flex items-center justify-between gap-2">
-          <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#1B4332]">
+          <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#1B4332] dark:text-emerald-400">
             <Sparkles className="h-3.5 w-3.5" />
             AI Magic Generate
           </h2>
@@ -244,21 +244,21 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1 rounded-md border border-[#DCD9D0] bg-white px-2 py-1 text-[10.5px] font-semibold text-[#141413] hover:border-[#141413] cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-2.5 py-1 text-[10.5px] font-semibold text-[#0F172A] dark:text-slate-100 hover:border-slate-400 dark:hover:border-slate-500 shadow-xs cursor-pointer whitespace-nowrap shrink-0 transition-colors"
             title="Upload PNG or JPG and trace to SVG"
           >
             <ImagePlus className="h-3 w-3" />
             Trace PNG/JPG
           </button>
         </div>
-        <p className="mt-1 text-[11px] leading-relaxed text-[#5C5951]">
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-400">
           Describe a custom logo symbol. Gemini generates a crisp mark and automatically traces it into an editable, recolorable SVG layer.
         </p>
       </div>
 
       {/* Prompt Input */}
       <div className="space-y-2">
-        <label className="block text-[11px] font-semibold text-[#141413]">
+        <label className="block text-[11px] font-semibold text-slate-900 dark:text-slate-200">
           Custom Symbol Prompt
         </label>
         <textarea
@@ -266,7 +266,7 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="e.g. minimalist geometric fox head, flat vector, white background"
-          className="w-full resize-none rounded-lg border border-[#DCD9D0] bg-white px-3 py-2 text-xs text-[#141413] focus:border-[#141413] focus:outline-none"
+          className="w-full resize-none rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-3 py-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-emerald-600 dark:focus:border-emerald-400 focus:outline-none"
         />
 
         <div className="flex flex-wrap gap-1">
@@ -275,10 +275,10 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
               key={sample}
               type="button"
               onClick={() => setPrompt(sample)}
-              className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer text-left truncate max-w-full ${
+              className={`rounded-lg border px-2 py-1 text-[10px] font-medium transition-colors cursor-pointer text-left truncate max-w-full ${
                 prompt === sample
-                  ? 'border-[#141413] bg-[#141413] text-white'
-                  : 'border-[#DCD9D0] bg-white text-[#4A4740] hover:border-[#141413]'
+                  ? 'border-[#1B4332] bg-[#1B4332] text-white dark:border-emerald-500 dark:bg-emerald-600'
+                  : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-600 dark:text-slate-300 hover:border-slate-400 dark:hover:border-slate-500'
               }`}
             >
               {sample.split(',')[0]}
@@ -289,7 +289,7 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
 
       {/* Vector Style Presets */}
       <div>
-        <label className="block text-[11px] font-semibold text-[#141413]">
+        <label className="block text-[11px] font-semibold text-slate-900 dark:text-slate-200">
           Mark Construction Style
         </label>
         <div
@@ -304,10 +304,10 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                 key={m.id}
                 type="button"
                 onClick={() => setStyleMode(m.id)}
-                className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer truncate ${
+                className={`rounded-xl border px-2 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer truncate ${
                   active
-                    ? 'border-[#141413] bg-[#141413] text-white'
-                    : 'border-[#E2DFD7] bg-white text-[#3F3E39] hover:border-[#141413]'
+                    ? 'border-[#0F172A] dark:border-emerald-500 bg-[#0F172A] dark:bg-emerald-600 text-white'
+                    : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] text-slate-700 dark:text-slate-300 hover:border-slate-400 dark:hover:border-slate-500'
                 }`}
               >
                 {m.label}
@@ -323,7 +323,7 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
           type="button"
           onClick={() => void handleGenerateAndTrace()}
           disabled={generating || !prompt.trim()}
-          className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-[#1B4332] px-3.5 py-2.5 text-xs font-semibold text-white hover:bg-[#143326] transition-colors disabled:opacity-55 cursor-pointer"
+          className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#1B4332] via-[#245942] to-[#2D6A4F] px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:brightness-110 transition-all disabled:opacity-55 cursor-pointer"
         >
           {generating ? (
             <>
@@ -343,7 +343,7 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
             type="button"
             onClick={() => void handleSuggestDirections()}
             disabled={suggestingConcepts}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#141413] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#141413] hover:bg-[#F3F1EB] transition-colors disabled:opacity-55 cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] px-3.5 py-2.5 text-xs font-semibold text-slate-900 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-[#252836] transition-colors disabled:opacity-55 cursor-pointer whitespace-nowrap"
           >
             {suggestingConcepts ? (
               <>
@@ -362,13 +362,13 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
 
       {/* Status or Error Feedback */}
       {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] leading-relaxed text-red-700">
+        <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-[11px] leading-relaxed text-red-700 dark:text-red-300">
           {errorMsg}
         </div>
       )}
 
       {!errorMsg && statusNotice && (
-        <div className="flex items-center gap-1.5 rounded-lg border border-[#1B4332]/20 bg-[#1B4332]/5 px-3 py-2 text-[11px] font-medium text-[#1B4332]">
+        <div className="flex items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-[#1B4332] dark:text-emerald-300">
           {generating ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           ) : (
@@ -380,8 +380,8 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
 
       {/* AI Concept Direction Cards (Wizard Mode) */}
       {suggestions.length > 0 && onApplyAiSuggestion && (
-        <div className="space-y-2 border-t border-[#E6E3DA] pt-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5C5951]">
+        <div className="space-y-2 border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
             AI Brand &amp; Symbol Directions
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -393,18 +393,20 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                   setPrompt(s.symbolPrompt);
                   onApplyAiSuggestion(s);
                 }}
-                className="flex flex-col justify-between rounded-lg border border-[#DCD9D0] bg-white p-2.5 text-left hover:border-[#141413] cursor-pointer"
+                className="flex flex-col justify-between rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-2.5 text-left hover:border-slate-400 dark:hover:border-slate-500 shadow-sm cursor-pointer"
               >
                 <div>
-                  <p className="text-xs font-bold text-[#141413] truncate">{s.title}</p>
-                  <p className="mt-0.5 text-[10.5px] font-semibold text-[#1B4332] truncate">
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                    {s.title}
+                  </p>
+                  <p className="mt-0.5 text-[10.5px] font-semibold text-[#1B4332] dark:text-emerald-400 truncate">
                     {s.businessName} · {s.style}
                   </p>
-                  <p className="mt-1 text-[10px] leading-snug text-[#5C5951] line-clamp-2">
+                  <p className="mt-1 text-[10px] leading-snug text-slate-500 dark:text-slate-400 line-clamp-2">
                     {s.rationale}
                   </p>
                 </div>
-                <span className="mt-2 text-[10px] font-semibold text-[#141413]">
+                <span className="mt-2 text-[10px] font-semibold text-slate-900 dark:text-slate-200">
                   Use Direction →
                 </span>
               </button>
@@ -415,13 +417,13 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
 
       {/* Raster + Traced Vector Preview & Fine-Tuning */}
       {sourceRasterUrl && traceResult && (
-        <div className="rounded-xl border border-[#DCD9D0] bg-white p-3 space-y-3">
+        <div className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#1E202B] p-3 space-y-3 shadow-sm">
           <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#6B675E]">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 AI Raster
               </p>
-              <div className="aspect-square overflow-hidden rounded-lg border border-[#EAE7DF] bg-white flex items-center justify-center p-1.5">
+              <div className="aspect-square overflow-hidden rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-white flex items-center justify-center p-1.5">
                 <img
                   src={sourceRasterUrl}
                   alt="AI generated symbol source"
@@ -431,17 +433,17 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
             </div>
 
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#1B4332]">
-                Traced Vector ({traceResult.contourCount} paths)
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#1B4332] dark:text-emerald-400">
+                Traced Vector ({traceResult.contourCount})
               </p>
               <div
-                className="aspect-square overflow-hidden rounded-lg border border-[#EAE7DF] flex items-center justify-center p-2"
+                className="aspect-square overflow-hidden rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] flex items-center justify-center p-2"
                 style={{
                   backgroundImage:
-                    'linear-gradient(45deg, #f0eee7 25%, transparent 25%), linear-gradient(-45deg, #f0eee7 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0eee7 75%), linear-gradient(-45deg, transparent 75%, #f0eee7 75%)',
+                    'linear-gradient(45deg, #e2e8f0 25%, transparent 25%), linear-gradient(-45deg, #e2e8f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e2e8f0 75%), linear-gradient(-45deg, transparent 75%, #e2e8f0 75%)',
                   backgroundSize: '12px 12px',
                   backgroundPosition: '0 0, 0 6px, 6px -6px, -6px 0',
-                  backgroundColor: '#faf9f6',
+                  backgroundColor: '#f8fafc',
                 }}
               >
                 <svg viewBox={traceResult.viewBox} className="h-full w-full">
@@ -459,11 +461,11 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
           </div>
 
           {/* Vectorizer Threshold / Smoothing Toggle */}
-          <div className="border-t border-[#EFECE4] pt-2">
+          <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-2">
             <button
               type="button"
               onClick={() => setShowTraceControls((v) => !v)}
-              className="flex w-full items-center justify-between text-[11px] font-semibold text-[#4A4740] hover:text-[#141413] cursor-pointer"
+              className="flex w-full items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
             >
               <span className="inline-flex items-center gap-1.5">
                 <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -478,10 +480,10 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                   <button
                     type="button"
                     onClick={() => setColorMode('mono')}
-                    className={`rounded border py-1 font-semibold cursor-pointer ${
+                    className={`rounded-lg border py-1 font-semibold cursor-pointer ${
                       colorMode === 'mono'
-                        ? 'border-[#141413] bg-[#141413] text-white'
-                        : 'border-[#DCD9D0] bg-[#FAF9F6] text-[#4A4740]'
+                        ? 'border-slate-900 dark:border-emerald-500 bg-slate-900 dark:bg-emerald-600 text-white'
+                        : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#161822] text-slate-600 dark:text-slate-300'
                     }`}
                   >
                     Mono Recolorable
@@ -489,10 +491,10 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                   <button
                     type="button"
                     onClick={() => setColorMode('duotone')}
-                    className={`rounded border py-1 font-semibold cursor-pointer ${
+                    className={`rounded-lg border py-1 font-semibold cursor-pointer ${
                       colorMode === 'duotone'
-                        ? 'border-[#141413] bg-[#141413] text-white'
-                        : 'border-[#DCD9D0] bg-[#FAF9F6] text-[#4A4740]'
+                        ? 'border-slate-900 dark:border-emerald-500 bg-slate-900 dark:bg-emerald-600 text-white'
+                        : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#161822] text-slate-600 dark:text-slate-300'
                     }`}
                   >
                     2-Tone Brand
@@ -500,7 +502,7 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-[#4A4740]">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-300">
                     <span>Threshold</span>
                     <span className="font-mono-num">{threshold}</span>
                   </div>
@@ -511,12 +513,12 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                     step={5}
                     value={threshold}
                     onChange={(e) => setThreshold(Number(e.target.value))}
-                    className="mt-0.5 w-full accent-[#141413] cursor-pointer"
+                    className="mt-0.5 w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
                   />
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-[#4A4740]">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-300">
                     <span>Curve Smoothing</span>
                     <span className="font-mono-num">{smoothness.toFixed(2)}</span>
                   </div>
@@ -527,16 +529,16 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
                     step={0.05}
                     value={smoothness}
                     onChange={(e) => setSmoothness(Number(e.target.value))}
-                    className="mt-0.5 w-full accent-[#141413] cursor-pointer"
+                    className="mt-0.5 w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
                   />
                 </div>
 
-                <label className="inline-flex items-center gap-1.5 text-[#3F3E39] cursor-pointer">
+                <label className="inline-flex items-center gap-1.5 text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={invertMask}
                     onChange={(e) => setInvertMask(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded accent-[#141413]"
+                    className="h-3.5 w-3.5 rounded accent-[#1B4332]"
                   />
                   <span>Invert Mask (Light on Dark)</span>
                 </label>
@@ -548,17 +550,17 @@ export const AiMagicPanel: React.FC<AiMagicPanelProps> = ({
             <button
               type="button"
               onClick={() => onInsertTracedSymbol(buildPayload(traceResult))}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#141413] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2A2926] cursor-pointer"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-slate-900 dark:bg-slate-100 px-3 py-2 text-xs font-semibold text-white dark:text-slate-900 hover:opacity-90 cursor-pointer"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              Place Traced SVG on Canvas
+              Place Traced SVG
             </button>
 
             {variant === 'wizard' && onGenerateVariationsWithSymbol && (
               <button
                 type="button"
                 onClick={() => onGenerateVariationsWithSymbol(buildPayload(traceResult))}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#1B4332] px-3 py-2 text-xs font-semibold text-white hover:bg-[#143326] cursor-pointer"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-[#1B4332] to-[#2D6A4F] px-3 py-2 text-xs font-semibold text-white hover:brightness-110 cursor-pointer"
               >
                 <Layers className="h-3.5 w-3.5" />
                 Generate 12 Variations
