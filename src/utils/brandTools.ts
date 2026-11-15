@@ -29,13 +29,28 @@ function deepCloneLayersFresh(layers: LogoLayer[]): LogoLayer[] {
       ...l,
       id: nextLayerId(l.type),
       shadow: { ...l.shadow },
-      fillGradient: l.fillGradient ? { ...l.fillGradient } : undefined,
+      fillGradient: l.fillGradient
+        ? {
+            ...l.fillGradient,
+            stops: l.fillGradient.stops?.map((s) => ({ ...s })),
+          }
+        : undefined,
+      fillPattern: l.fillPattern ? { ...l.fillPattern } : undefined,
+      clipMask: l.clipMask
+        ? {
+            ...l.clipMask,
+            customPaths: l.clipMask.customPaths ? [...l.clipMask.customPaths] : undefined,
+          }
+        : undefined,
     };
     if (base.type === 'icon' && l.type === 'icon') {
       return { ...base, partColors: l.partColors ? [...l.partColors] : undefined };
     }
     if (base.type === 'custom-svg' && l.type === 'custom-svg') {
       return { ...base, paths: l.paths.map((p) => ({ ...p })) };
+    }
+    if (base.type === 'path' && l.type === 'path') {
+      return { ...base, pathDataList: [...l.pathDataList] };
     }
     return base;
   });
@@ -171,8 +186,17 @@ export function magicRecolorDocument(
                 startColor: nextFill,
                 endColor: alt,
                 midColor: layer.fillGradient.midColor ? c2 : undefined,
+                stops: undefined,
               }
             : layer.fillGradient,
+          fillPattern: layer.fillPattern?.enabled
+            ? {
+                ...layer.fillPattern,
+                foregroundColor: nextFill,
+                backgroundColor:
+                  layer.fillPattern.backgroundColor === 'transparent' ? 'transparent' : alt,
+              }
+            : layer.fillPattern,
           stroke: layer.strokeWidth > 0 ? alt : 'none',
         });
       }
@@ -327,6 +351,7 @@ function buildSingleInkVariant(
         secondaryFill: activeInk,
         partColors: layer.partColors?.map(() => activeInk),
         fillGradient: undefined,
+        fillPattern: undefined,
         stroke: layer.strokeWidth > 0 ? activeInk : 'none',
       };
     }
@@ -336,6 +361,7 @@ function buildSingleInkVariant(
         ...layer,
         fill: activeInk,
         fillGradient: undefined,
+        fillPattern: undefined,
         stroke: layer.strokeWidth > 0 ? activeInk : 'none',
         preserveOriginalColors: false,
         paths: layer.paths.map((p) => ({
@@ -354,6 +380,7 @@ function buildSingleInkVariant(
         stroke: hollow || layer.strokeWidth > 0 ? inkHex : 'none',
         strokeWidth: hollow ? Math.max(4, layer.strokeWidth) : layer.strokeWidth,
         fillGradient: undefined,
+        fillPattern: undefined,
       };
     }
 
@@ -362,6 +389,7 @@ function buildSingleInkVariant(
       fill: activeInk,
       stroke: layer.strokeWidth > 0 ? activeInk : 'none',
       fillGradient: undefined,
+      fillPattern: undefined,
     };
   });
 

@@ -124,6 +124,12 @@ export interface LayerShadow {
   offsetY: number;
 }
 
+export interface GradientStop {
+  id: string;
+  offset: number; // 0..100
+  color: string;
+}
+
 export interface LayerGradient {
   enabled: boolean;
   type: 'linear' | 'radial';
@@ -131,6 +137,50 @@ export interface LayerGradient {
   startColor: string;
   endColor: string;
   midColor?: string;
+  stops?: GradientStop[];
+  radialCx?: number; // 0..100
+  radialCy?: number; // 0..100
+  radialR?: number; // 15..120
+}
+
+export type PatternPresetKind =
+  | 'diagonal-stripes'
+  | 'halftone-dots'
+  | 'grid-mesh'
+  | 'chevron-wave'
+  | 'crosshatch'
+  | 'terrazzo-geo'
+  | 'concentric-rings';
+
+export interface LayerPatternFill {
+  enabled: boolean;
+  preset: PatternPresetKind;
+  foregroundColor: string;
+  backgroundColor: string;
+  scale: number; // 0.4..2.5
+  rotation: number; // 0..360
+}
+
+export type ClipMaskShapeKind =
+  | 'circle'
+  | 'rounded-rect'
+  | 'pill'
+  | 'hexagon'
+  | 'octagon'
+  | 'shield'
+  | 'diamond'
+  | 'triangle'
+  | 'star'
+  | 'arch'
+  | 'custom';
+
+export interface LayerClipMask {
+  enabled: boolean;
+  shape: ClipMaskShapeKind;
+  cornerRadius?: number;
+  scale?: number; // 0.35..1.25
+  customPaths?: string[];
+  customViewBox?: { width: number; height: number };
 }
 
 export interface LayerBase {
@@ -148,6 +198,8 @@ export interface LayerBase {
   locked: boolean;
   fill: string;
   fillGradient?: LayerGradient;
+  fillPattern?: LayerPatternFill;
+  clipMask?: LayerClipMask;
   stroke: string;
   strokeWidth: number;
   shadow: LayerShadow;
@@ -194,6 +246,7 @@ export interface PathLayer extends LayerBase {
   /** SVG path data strings relative to sourceViewBox */
   pathDataList: string[];
   sourceViewBox: { width: number; height: number };
+  fillRule?: 'nonzero' | 'evenodd';
   sourceText?: string;
 }
 

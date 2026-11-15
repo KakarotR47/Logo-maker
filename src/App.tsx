@@ -58,6 +58,12 @@ import {
   persistActiveSession,
   persistSavedProjects,
 } from './utils/projectStorage';
+import {
+  BooleanOpKind,
+  combineVectorLayers,
+  createClippingMaskFromSelection,
+  isCombinableVectorLayer,
+} from './utils/booleanOps';
 import { parseUploadedSvgToLayer } from './utils/svgExport';
 import { convertTextLayerToPath } from './utils/textToPath';
 
@@ -119,6 +125,8 @@ export default function App() {
   const [generatedVariations, setGeneratedVariations] = useState<LogoVariationEntry[]>([]);
   const [recolorStep, setRecolorStep] = useState<number>(0);
   const [incomingLogoNonce, setIncomingLogoNonce] = useState<number>(0);
+  const [editorNotice, setEditorNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
 
   const [savedKits, setSavedKits] = useState<SavedBrandKit[]>(() => {
     try {
@@ -947,6 +955,25 @@ export default function App() {
     });
   };
 
+  const showEditorNotice = (message: string) => {
+    setEditorNotice(message);
+    if (noticeTimerRef.current !== null) {
+      window.clearTimeout(noticeTimerRef.current);
+    }
+    noticeTimerRef.current = window.setTimeout(() => {
+      setEditorNotice(null);
+      noticeTimerRef.current = null;
+    }, 3200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current !== null) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleConvertTextToPath = async (layer: TextLayer) => {
     const pathLayer = await convertTextLayerToPath(layer);
     commitDocument({
@@ -954,6 +981,54 @@ export default function App() {
       layers: activeDoc.layers.map((l) => (l.id === layer.id ? pathLayer : l)),
     });
     setSelectedLayerIds([pathLayer.id]);
+  };
+
+  const handleBooleanCombine = (op: BooleanOpKind) => {
+    const ordered = activeDoc.layers.filter(
+      (l) => selectedLayerIds.includes(l.id) && l.visible && !l.locked
+    );
+    const combinable = ordered.filter(isCombinableVectorLayer);
+    const res = combineVectorLayers(combinable, op);
+    if (!res.ok) {
+      showEditorNotice(res.reason);
+      return;
+    }
+
+    const consumedIds = new Set(combinable.map((l) => l.id));
+    let insertAt = 0;
+    let lastConsumedIndex = -1;
+    activeDoc.layers.forEach((l, i) => {
+      if (consumedIds.has(l.id)) lastConsumedIndex = i;
+    });
+    for (let i = 0; i <= lastConsumedIndex; i++) {
+      if (!consumedIds.has(activeDoc.layers[i].id)) {
+        insertAt += 1;
+      }
+    }
+
+    const remaining = activeDoc.layers.filter((l) => !consumedIds.has(l.id));
+    remaining.splice(insertAt, 0, res.layer);
+    commitDocument({ ...activeDoc, layers: remaining });
+    setSelectedLayerIds([res.layer.id]);
+  };
+
+  const handleCreateClippingMask = async () => {
+    const ordered = activeDoc.layers.filter(
+      (l) => selectedLayerIds.includes(l.id) && l.visible && !l.locked
+    );
+    const res = await createClippingMaskFromSelection(ordered);
+    if (!res.ok) {
+      showEditorNotice(res.reason);
+      return;
+    }
+
+    const consumedSet = new Set(res.consumedLayerIds);
+    const nextLayers = activeDoc.layers
+      .filter((l) => !consumedSet.has(l.id))
+      .map((l) => (l.id === res.clippedLayer.id ? res.clippedLayer : l));
+
+    commitDocument({ ...activeDoc, layers: nextLayers });
+    setSelectedLayerIds([res.clippedLayer.id]);
   };
 
   const handleSaveBrandKit = () => {
@@ -1346,6 +1421,9 @@ export default function App() {
               onUpdateLayer={handleUpdateLayer}
               onAlignSelectedLayers={handleAlignSelectedLayers}
               onBatchUpdateSelected={handleBatchUpdateSelected}
+              onBooleanCombine={handleBooleanCombine}
+              onCreateClippingMask={handleCreateClippingMask}
+              editorNotice={editorNotice}
               onApplyFontPairing={handleApplyFontPairing}
               onReorderLayer={handleReorderLayer}
               onConvertTextToPath={handleConvertTextToPath}

@@ -24,6 +24,7 @@ import {
   analyzeDocumentContrast,
   checkSafeZoneViolations,
 } from '../utils/contrastChecker';
+import { BooleanOpKind } from '../utils/booleanOps';
 import { CanvasLayerNode } from './CanvasLayerRenderer';
 import { FloatingContextToolbar } from './FloatingContextToolbar';
 
@@ -66,6 +67,9 @@ interface LogoCanvasEditorProps {
     mode: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom'
   ) => void;
   onBatchUpdateSelected: (patch: Partial<LogoLayer>) => void;
+  onBooleanCombine?: (op: BooleanOpKind) => void;
+  onCreateClippingMask?: () => void;
+  editorNotice?: string | null;
   onApplyFontPairing: (pairing: FontPairing) => void;
   onReorderLayer: (id: string, dir: 'up' | 'down') => void;
   onConvertTextToPath: (layer: TextLayer) => Promise<void>;
@@ -104,6 +108,9 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onUpdateLayer,
   onAlignSelectedLayers,
   onBatchUpdateSelected,
+  onBooleanCombine,
+  onCreateClippingMask,
+  editorNotice,
   onApplyFontPairing,
   onReorderLayer,
   onConvertTextToPath,
@@ -762,6 +769,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           onUpdateLayer={onUpdateLayer}
           onAlignSelectedLayers={onAlignSelectedLayers}
           onBatchUpdateSelected={onBatchUpdateSelected}
+          onBooleanCombine={onBooleanCombine}
+          onCreateClippingMask={onCreateClippingMask}
           onApplyFontPairing={onApplyFontPairing}
           onDuplicateSelected={onDuplicateSelected}
           onDeleteSelected={onDeleteSelected}
@@ -790,6 +799,11 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           }
         }}
       >
+        {editorNotice && (
+          <div className="pointer-events-none absolute top-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50/95 px-3.5 py-1.5 text-xs font-semibold text-amber-900 shadow-md backdrop-blur dark:border-amber-700 dark:bg-amber-950/90 dark:text-amber-200">
+            {editorNotice}
+          </div>
+        )}
         <div
           className="relative shrink-0 shadow-[0_14px_42px_rgba(15,23,42,0.14)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.55)] ring-1 ring-[#E2E8F0] dark:ring-[#2A2D3D]"
           style={{

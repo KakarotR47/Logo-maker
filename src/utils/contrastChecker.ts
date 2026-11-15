@@ -161,9 +161,15 @@ export function resolveEffectiveBackdrop(
     if (under.shapeKind === 'ring' || under.shapeKind === 'frame') continue;
     if (!doesPointOverlapLayer(cx, cy, under)) continue;
 
-    const rawFill = under.fillGradient?.enabled
-      ? under.fillGradient.midColor || under.fillGradient.startColor
-      : under.fill;
+    const rawFill = under.fillPattern?.enabled
+      ? under.fillPattern.backgroundColor !== 'transparent'
+        ? under.fillPattern.backgroundColor
+        : under.fillPattern.foregroundColor
+      : under.fillGradient?.enabled
+        ? under.fillGradient.stops?.[0]?.color ||
+          under.fillGradient.midColor ||
+          under.fillGradient.startColor
+        : under.fill;
     const parsedFill = parseColorRgba(rawFill);
     if (!parsedFill || parsedFill.a === 0) continue;
 
@@ -220,13 +226,20 @@ export function analyzeDocumentContrast(
     if (layer.type === 'text' && !layer.text.trim()) return;
 
     const bgHex = resolveEffectiveBackdrop(doc, idx, layer);
-    const candidateFills = layer.fillGradient?.enabled
-      ? [
-          layer.fillGradient.startColor,
-          layer.fillGradient.midColor,
-          layer.fillGradient.endColor,
-        ].filter((c): c is string => Boolean(c))
-      : [layer.fill];
+    const candidateFills = layer.fillPattern?.enabled
+      ? [layer.fillPattern.foregroundColor, layer.fillPattern.backgroundColor].filter(
+          (c): c is string => Boolean(c && c !== 'transparent' && c !== 'none')
+        )
+      : layer.fillGradient?.enabled
+        ? (layer.fillGradient.stops && layer.fillGradient.stops.length > 0
+            ? layer.fillGradient.stops.map((s) => s.color)
+            : [
+                layer.fillGradient.startColor,
+                layer.fillGradient.midColor,
+                layer.fillGradient.endColor,
+              ]
+          ).filter((c): c is string => Boolean(c))
+        : [layer.fill];
 
     let minStopRatio = 21;
     let minStopColor = layer.fill;

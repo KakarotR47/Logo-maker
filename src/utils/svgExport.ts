@@ -239,6 +239,7 @@ export function parseUploadedSvgToLayer(
  */
 function sanitizeExportedSvgDom(svgNode: SVGSVGElement) {
   svgNode.querySelectorAll('g[data-layer-id]').forEach((g) => {
+    g.querySelectorAll(':scope > rect[data-hit-target="true"]').forEach((r) => r.remove());
     const firstChild = g.firstElementChild;
     if (
       firstChild &&
@@ -366,6 +367,7 @@ export async function buildCleanSvgString(
     // Measure tight bounds BEFORE stripping hit-target rects? No — strip hit-target rects FIRST
     // while keeping data-layer-id so getBBox() measures only actual artwork!
     svgNode.querySelectorAll('g[data-layer-id]').forEach((g) => {
+      g.querySelectorAll(':scope > rect[data-hit-target="true"]').forEach((r) => r.remove());
       const firstChild = g.firstElementChild;
       if (
         firstChild &&

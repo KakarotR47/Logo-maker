@@ -13,6 +13,7 @@ import {
   ArrowUp,
   Bold,
   ChevronDown,
+  Combine,
   Copy,
   CreditCard,
   Crop,
@@ -27,6 +28,7 @@ import {
   PenTool,
   Plus,
   Redo2,
+  Scissors,
   Search,
   Shuffle,
   SlidersHorizontal,
@@ -40,28 +42,33 @@ import {
 } from 'lucide-react';
 import { FONT_OPTIONS, FONT_PAIRINGS, VECTOR_ICONS } from '../data/logoLibrary';
 import {
+  ClipMaskShapeKind,
   ColorPalette,
   FontOption,
   FontPairing,
   LayerGradient,
   LogoDocument,
   LogoLayer,
+  ShapeKind,
   TextLayer,
 } from '../types/logo';
+import { BooleanOpKind, isCombinableVectorLayer } from '../utils/booleanOps';
 import {
   batchLoadGoogleFonts,
   createDynamicGoogleFontOption,
   ensureFontOptionLoaded,
   loadGoogleFont,
 } from '../utils/googleFonts';
+import { GradientPatternPicker, buildGradientCss } from './GradientPatternPicker';
 
 type ContextPopoverId =
   | 'canvas-bg'
+  | 'combine'
   | 'text-edit'
   | 'font'
   | 'fill'
   | 'stroke'
-  | 'flip'
+  | 'radius'
   | 'crop'
   | 'opacity'
   | 'effects'
@@ -69,6 +76,30 @@ type ContextPopoverId =
   | 'multi-align'
   | 'multi-fill'
   | 'multi-opacity';
+
+const CORNER_ROUNDABLE_SHAPES: ReadonlySet<ShapeKind> = new Set([
+  'rounded-rect',
+  'frame',
+  'hexagon',
+  'octagon',
+  'diamond',
+  'triangle',
+  'parallelogram',
+  'ribbon-banner',
+  'shield',
+  'crest-double',
+]);
+
+const CLIP_MASK_SHAPES: Array<{ kind: ClipMaskShapeKind; label: string }> = [
+  { kind: 'circle', label: 'Circle' },
+  { kind: 'rounded-rect', label: 'Rounded' },
+  { kind: 'pill', label: 'Pill' },
+  { kind: 'hexagon', label: 'Hexagon' },
+  { kind: 'shield', label: 'Shield' },
+  { kind: 'diamond', label: 'Diamond' },
+  { kind: 'star', label: 'Star' },
+  { kind: 'arch', label: 'Arch' },
+];
 
 interface FloatingContextToolbarProps {
   doc: LogoDocument;
@@ -81,6 +112,8 @@ interface FloatingContextToolbarProps {
   onUpdateLayer: (updated: LogoLayer) => void;
   onAlignSelectedLayers: (mode: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom') => void;
   onBatchUpdateSelected: (patch: Partial<LogoLayer>) => void;
+  onBooleanCombine?: (op: BooleanOpKind) => void;
+  onCreateClippingMask?: () => void;
   onApplyFontPairing: (pairing: FontPairing) => void;
   onDuplicateSelected: () => void;
   onDeleteSelected: () => void;
@@ -146,6 +179,8 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
   onUpdateLayer,
   onAlignSelectedLayers,
   onBatchUpdateSelected,
+  onBooleanCombine,
+  onCreateClippingMask,
   onApplyFontPairing,
   onDuplicateSelected,
   onDeleteSelected,
@@ -227,41 +262,6 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
       '#FFFFFF',
     ])
   );
-
-  const gradientPresets: Array<{
-    name: string;
-    startColor: string;
-    endColor: string;
-    midColor?: string;
-    angle: number;
-  }> = [
-    {
-      name: 'Brand Duo',
-      startColor: activePalette.primary,
-      endColor: activePalette.accent,
-      angle: 135,
-    },
-    {
-      name: 'Champagne Gold',
-      startColor: '#8B651D',
-      midColor: '#F3DC96',
-      endColor: '#B8872C',
-      angle: 120,
-    },
-    {
-      name: 'Silver Chrome',
-      startColor: '#525866',
-      midColor: '#EAECEF',
-      endColor: '#767D8C',
-      angle: 135,
-    },
-    {
-      name: 'Ember Sunset',
-      startColor: '#B44B31',
-      endColor: '#E89B4C',
-      angle: 90,
-    },
-  ];
 
   const togglePopover = (id: ContextPopoverId) => {
     setOpenPopover((prev) => (prev === id ? null : id));
@@ -457,6 +457,8 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
   // STATE 2: MULTI-SELECT CONTEXT BAR
   // =========================================================================
   if (selectedLayers.length > 1) {
+    const combinableCount = selectedLayers.filter(isCombinableVectorLayer).length;
+
     return (
       <div
         ref={containerRef}
@@ -468,6 +470,135 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
         <span className="px-2 py-1 text-xs font-semibold text-[#1B4332] dark:text-emerald-400">
           {selectedLayers.length} layers
         </span>
+
+        {/* Combine Shapes (Boolean Operations: Unite, Subtract, Intersect, Exclude) */}
+        {combinableCount >= 2 && onBooleanCombine && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => togglePopover('combine')}
+              className={`${toolBtnBase} border border-[#E2E8F0] dark:border-[#2A2D3D] ${
+                openPopover === 'combine'
+                  ? toolBtnActive
+                  : 'bg-emerald-50/70 dark:bg-emerald-950/30 text-[#1B4332] dark:text-emerald-300 hover:bg-emerald-100/70 dark:hover:bg-emerald-950/50'
+              }`}
+              title="Boolean Shape Operations (Unite, Subtract, Intersect, Exclude)"
+            >
+              <Combine className="h-3.5 w-3.5" />
+              <span>Combine Shapes</span>
+              <ChevronDown className="h-3 w-3 opacity-75" />
+            </button>
+
+            {openPopover === 'combine' && (
+              <div className={`${popoverClass} w-64 space-y-1.5`}>
+                <p className="text-xs font-semibold">Combine Shapes ({combinableCount})</p>
+                <p className="text-[10.5px] text-slate-500 dark:text-slate-400 pb-1">
+                  Construct custom vector geometry from selected shapes.
+                </p>
+                {(
+                  [
+                    {
+                      op: 'unite' as const,
+                      label: 'Unite (Merge)',
+                      desc: 'Join shapes into one outline',
+                      glyph: (
+                        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0">
+                          <path
+                            d="M3 3 H12 V8 H17 V17 H8 V12 H3 Z"
+                            fill="currentColor"
+                            opacity={0.85}
+                          />
+                        </svg>
+                      ),
+                    },
+                    {
+                      op: 'subtract' as const,
+                      label: 'Subtract',
+                      desc: 'Cut top shapes from bottom shape',
+                      glyph: (
+                        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0">
+                          <path
+                            d="M3 3 H12 V8 H8 V12 H3 Z"
+                            fill="currentColor"
+                            opacity={0.85}
+                          />
+                          <rect
+                            x={8}
+                            y={8}
+                            width={9}
+                            height={9}
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.3}
+                            strokeDasharray="2 1.5"
+                          />
+                        </svg>
+                      ),
+                    },
+                    {
+                      op: 'intersect' as const,
+                      label: 'Intersect',
+                      desc: 'Keep only overlapping area',
+                      glyph: (
+                        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0">
+                          <rect x={3} y={3} width={9} height={9} fill="none" stroke="currentColor" strokeWidth={1.2} opacity={0.4} />
+                          <rect x={8} y={8} width={9} height={9} fill="none" stroke="currentColor" strokeWidth={1.2} opacity={0.4} />
+                          <rect x={8} y={8} width={4} height={4} fill="currentColor" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      op: 'exclude' as const,
+                      label: 'Exclude',
+                      desc: 'Punch out overlapping area',
+                      glyph: (
+                        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0">
+                          <path
+                            d="M3 3 H12 V8 H8 V12 H3 Z M12 8 H17 V17 H8 V12 H12 Z"
+                            fill="currentColor"
+                            fillRule="evenodd"
+                            opacity={0.85}
+                          />
+                        </svg>
+                      ),
+                    },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.op}
+                    type="button"
+                    onClick={() => {
+                      onBooleanCombine(item.op);
+                      setOpenPopover(null);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] px-2.5 py-2 text-left hover:border-emerald-600 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 cursor-pointer transition-colors"
+                  >
+                    <span className="text-[#1B4332] dark:text-emerald-400">{item.glyph}</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold leading-tight">{item.label}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                        {item.desc}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Clipping Mask from 2+ selected layers */}
+        {onCreateClippingMask && (
+          <button
+            type="button"
+            onClick={onCreateClippingMask}
+            title="Clip gradient, pattern, or artwork inside the selected shape or text"
+            className={`${toolBtnBase} ${toolBtnDefault}`}
+          >
+            <Scissors className="h-3.5 w-3.5" />
+            <span>Clip Mask</span>
+          </button>
+        )}
 
         {/* Batch Fill */}
         <div className="relative">
@@ -990,29 +1121,31 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
       )}
 
       {/* ================================================================= */}
-      {/* SHARED FILL & GRADIENT COLOR POPOVER (Text + Shapes/Icons/SVGs)   */}
+      {/* SHARED FILL, MULTI-STOP GRADIENT & PATTERN CLIPPING POPOVER       */}
       {/* ================================================================= */}
       <div className="relative">
         <button
           type="button"
           onClick={() => togglePopover('fill')}
           className={`${toolBtnBase} ${openPopover === 'fill' ? toolBtnActive : toolBtnDefault}`}
-          title={isText ? 'Text Color & Gradient' : 'Fill Color, Gradient & SVG Parts'}
+          title={isText ? 'Text Color, Multi-Stop Gradient & Pattern Clip' : 'Fill, Gradient, Pattern & SVG Parts'}
         >
           <span
             className="h-4 w-4 rounded-full border border-black/20 dark:border-white/25 shrink-0"
             style={{
-              backgroundImage: activeGradient.enabled
-                ? `linear-gradient(${activeGradient.angle}deg, ${activeGradient.startColor}, ${activeGradient.endColor})`
-                : singleLayer.fill === 'transparent'
-                  ? 'linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)'
-                  : 'none',
+              backgroundImage: singleLayer.fillPattern?.enabled
+                ? `repeating-linear-gradient(45deg, ${singleLayer.fillPattern.foregroundColor}, ${singleLayer.fillPattern.foregroundColor} 2px, ${singleLayer.fillPattern.backgroundColor === 'transparent' ? '#ffffff' : singleLayer.fillPattern.backgroundColor} 2px, ${singleLayer.fillPattern.backgroundColor === 'transparent' ? '#ffffff' : singleLayer.fillPattern.backgroundColor} 5px)`
+                : activeGradient.enabled
+                  ? buildGradientCss(activeGradient)
+                  : singleLayer.fill === 'transparent'
+                    ? 'linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)'
+                    : 'none',
               backgroundSize:
-                !activeGradient.enabled && singleLayer.fill === 'transparent'
+                !singleLayer.fillPattern?.enabled && !activeGradient.enabled && singleLayer.fill === 'transparent'
                   ? '8px 8px'
                   : 'auto',
               backgroundColor:
-                !activeGradient.enabled && singleLayer.fill !== 'transparent'
+                !singleLayer.fillPattern?.enabled && !activeGradient.enabled && singleLayer.fill !== 'transparent'
                   ? singleLayer.fill
                   : '#ffffff',
             }}
@@ -1021,184 +1154,27 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
         </button>
 
         {openPopover === 'fill' && (
-          <div className={`${popoverClass} w-80 space-y-3`}>
+          <div className={`${popoverClass} w-84 space-y-3`}>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold">Fill &amp; Gradient</span>
-              <div className="inline-flex rounded-full border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-100 dark:bg-[#1E202B] p-0.5 text-[10px] font-semibold">
-                <button
-                  type="button"
-                  onClick={() =>
-                    update({ fillGradient: { ...activeGradient, enabled: false } })
-                  }
-                  className={`rounded-full px-2.5 py-0.5 cursor-pointer ${
-                    !activeGradient.enabled
-                      ? 'bg-white dark:bg-[#2A2D3D] text-slate-900 dark:text-white shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  Solid
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    update({ fillGradient: { ...activeGradient, enabled: true } })
-                  }
-                  className={`rounded-full px-2.5 py-0.5 cursor-pointer ${
-                    activeGradient.enabled
-                      ? 'bg-white dark:bg-[#2A2D3D] text-slate-900 dark:text-white shadow-xs'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  Gradient
-                </button>
-              </div>
+              <span className="text-xs font-semibold">Fill, Gradient &amp; Pattern</span>
+              {(activeGradient.enabled || singleLayer.fillPattern?.enabled) && (
+                <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  {singleLayer.fillPattern?.enabled
+                    ? 'Pattern'
+                    : activeGradient.type === 'radial'
+                      ? 'Radial'
+                      : 'Linear'}
+                </span>
+              )}
             </div>
 
-            {!activeGradient.enabled ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {quickSwatches.map((hex) => (
-                  <button
-                    key={hex}
-                    type="button"
-                    onClick={() => update({ fill: hex })}
-                    className={`h-7 w-7 rounded-lg border cursor-pointer ${
-                      singleLayer.fill.toLowerCase() === hex.toLowerCase()
-                        ? 'ring-2 ring-emerald-600 ring-offset-1 border-black/30'
-                        : 'border-black/15 dark:border-white/15'
-                    }`}
-                    style={{ backgroundColor: hex }}
-                    title={hex}
-                  />
-                ))}
-                <input
-                  type="color"
-                  value={singleLayer.fill === 'transparent' ? '#141413' : singleLayer.fill}
-                  onChange={(e) => update({ fill: e.target.value })}
-                  aria-label="Primary fill color"
-                  className="h-7 w-8 cursor-pointer rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-transparent p-0.5"
-                />
-                {!isText && (
-                  <button
-                    type="button"
-                    onClick={() => update({ fill: 'transparent' })}
-                    className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] px-2 py-1 text-[10px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
-                  >
-                    None
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(['linear', 'radial'] as const).map((gType) => (
-                    <button
-                      key={gType}
-                      type="button"
-                      onClick={() =>
-                        update({
-                          fillGradient: { ...activeGradient, enabled: true, type: gType },
-                        })
-                      }
-                      className={`rounded-lg border py-1 text-[10.5px] font-semibold capitalize cursor-pointer ${
-                        activeGradient.type === gType
-                          ? 'border-slate-900 bg-slate-900 text-white dark:border-emerald-500 dark:bg-emerald-600'
-                          : 'border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B]'
-                      }`}
-                    >
-                      {gType}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2 py-1 text-[11px] font-medium">
-                    <span>Start</span>
-                    <input
-                      type="color"
-                      value={activeGradient.startColor}
-                      onChange={(e) =>
-                        update({
-                          fillGradient: {
-                            ...activeGradient,
-                            enabled: true,
-                            startColor: e.target.value,
-                          },
-                        })
-                      }
-                      className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] px-2 py-1 text-[11px] font-medium">
-                    <span>End</span>
-                    <input
-                      type="color"
-                      value={activeGradient.endColor}
-                      onChange={(e) =>
-                        update({
-                          fillGradient: {
-                            ...activeGradient,
-                            enabled: true,
-                            endColor: e.target.value,
-                          },
-                        })
-                      }
-                      className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0"
-                    />
-                  </label>
-                </div>
-                {activeGradient.type === 'linear' && (
-                  <div>
-                    <div className="flex justify-between text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
-                      <span>Angle</span>
-                      <span className="font-mono-num">{activeGradient.angle}°</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={360}
-                      step={15}
-                      value={activeGradient.angle}
-                      onChange={(e) =>
-                        update({
-                          fillGradient: {
-                            ...activeGradient,
-                            enabled: true,
-                            angle: Number(e.target.value),
-                          },
-                        })
-                      }
-                      className="mt-0.5 w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
-                    />
-                  </div>
-                )}
-                <div className="grid grid-cols-4 gap-1.5">
-                  {gradientPresets.map((gp) => (
-                    <button
-                      key={gp.name}
-                      type="button"
-                      onClick={() =>
-                        update({
-                          fillGradient: {
-                            enabled: true,
-                            type: 'linear',
-                            angle: gp.angle,
-                            startColor: gp.startColor,
-                            midColor: gp.midColor,
-                            endColor: gp.endColor,
-                          },
-                        })
-                      }
-                      title={gp.name}
-                      className="h-6 rounded-lg border border-black/15 cursor-pointer"
-                      style={{
-                        backgroundImage: gp.midColor
-                          ? `linear-gradient(${gp.angle}deg, ${gp.startColor}, ${gp.midColor}, ${gp.endColor})`
-                          : `linear-gradient(${gp.angle}deg, ${gp.startColor}, ${gp.endColor})`,
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+            <GradientPatternPicker
+              layer={singleLayer}
+              activePalette={activePalette}
+              quickSwatches={quickSwatches}
+              isText={isText}
+              onUpdate={update}
+            />
 
             {/* Icon multi-tone & SVG Part overrides */}
             {singleLayer.type === 'icon' && (
@@ -1482,125 +1458,262 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
             )}
           </div>
 
-          {/* Flip Horizontal / Vertical Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => togglePopover('flip')}
-              className={`${toolBtnBase} ${
-                openPopover === 'flip' || singleLayer.flipX || singleLayer.flipY
-                  ? toolBtnActive
-                  : toolBtnDefault
-              }`}
-              title="Flip Horizontal or Vertical"
-            >
-              <FlipHorizontal2 className="h-3.5 w-3.5" />
-              <span>Flip</span>
-            </button>
+          {/* Direct Corner Radius Quick Popover for Rectangles & Badges */}
+          {singleLayer.type === 'shape' && CORNER_ROUNDABLE_SHAPES.has(singleLayer.shapeKind) && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => togglePopover('radius')}
+                className={`${toolBtnBase} ${
+                  openPopover === 'radius' ? toolBtnActive : toolBtnDefault
+                }`}
+                title="Adjust Corner Radius"
+              >
+                <span className="inline-block h-3.5 w-3.5 rounded-[4px] border-2 border-current" />
+                <span>Radius</span>
+                <span className="font-mono-num text-[10px] opacity-75">
+                  {singleLayer.cornerRadius}
+                </span>
+              </button>
 
-            {openPopover === 'flip' && (
-              <div className={`${popoverClass} w-52 space-y-1.5`}>
-                <p className="text-xs font-semibold mb-1">Flip Element</p>
-                <button
-                  type="button"
-                  onClick={() => update({ flipX: !singleLayer.flipX })}
-                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer ${
-                    singleLayer.flipX
-                      ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
-                      : 'border-[#E2E8F0] dark:border-[#2A2D3D] hover:bg-slate-50 dark:hover:bg-[#252836]'
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <FlipHorizontal2 className="h-3.5 w-3.5" />
-                    Flip Horizontal
-                  </span>
-                  {singleLayer.flipX && <span className="text-[10px] font-bold">ON</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => update({ flipY: !singleLayer.flipY })}
-                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-xs font-medium cursor-pointer ${
-                    singleLayer.flipY
-                      ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'
-                      : 'border-[#E2E8F0] dark:border-[#2A2D3D] hover:bg-slate-50 dark:hover:bg-[#252836]'
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <FlipVertical2 className="h-3.5 w-3.5" />
-                    Flip Vertical
-                  </span>
-                  {singleLayer.flipY && <span className="text-[10px] font-bold">ON</span>}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Crop / Aspect & Bounds Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => togglePopover('crop')}
-              className={`${toolBtnBase} ${
-                openPopover === 'crop' ? toolBtnActive : toolBtnDefault
-              }`}
-              title="Crop Aspect, Corner Radius & Bounds"
-            >
-              <Crop className="h-3.5 w-3.5" />
-              <span>Crop</span>
-            </button>
-
-            {openPopover === 'crop' && (
-              <div className={`${popoverClass} w-64 space-y-3`}>
-                <p className="text-xs font-semibold">Aspect Frame &amp; Bounds</p>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {(
-                    [
-                      ['1:1', 1, 1],
-                      ['4:3', 4, 3],
-                      ['16:9', 16, 9],
-                      ['3:4', 3, 4],
-                    ] as const
-                  ).map(([label, rw, rh]) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => applyAspectCrop(rw, rh)}
-                      className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] py-1.5 text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
-                    >
-                      {label}
-                    </button>
-                  ))}
+              {openPopover === 'radius' && (
+                <div className={`${popoverClass} w-60 space-y-2.5`}>
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span>Corner Radius</span>
+                    <span className="font-mono-num text-emerald-700 dark:text-emerald-400">
+                      {singleLayer.cornerRadius}px
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={64}
+                    value={singleLayer.cornerRadius}
+                    onChange={(e) => update({ cornerRadius: Number(e.target.value) })}
+                    className="w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                  />
+                  <div className="grid grid-cols-5 gap-1">
+                    {[0, 8, 18, 32, 48].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => update({ cornerRadius: r })}
+                        className={`rounded-md border py-0.5 text-[10px] font-mono-num cursor-pointer ${
+                          singleLayer.cornerRadius === r
+                            ? 'border-emerald-600 bg-emerald-600 text-white'
+                            : 'border-[#E2E8F0] dark:border-[#2A2D3D]'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
 
-                {singleLayer.type === 'shape' && singleLayer.shapeKind === 'rounded-rect' && (
+      {/* Direct 1-Click Flip Horizontal & Flip Vertical Buttons (Works for Shapes, Icons, SVGs & Text) */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => update({ flipX: !singleLayer.flipX })}
+          title="Flip Horizontal"
+          aria-label="Flip Horizontal"
+          className={`${toolBtnBase} px-2 ${
+            singleLayer.flipX ? toolBtnActive : toolBtnDefault
+          }`}
+        >
+          <FlipHorizontal2 className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => update({ flipY: !singleLayer.flipY })}
+          title="Flip Vertical"
+          aria-label="Flip Vertical"
+          className={`${toolBtnBase} px-2 ${
+            singleLayer.flipY ? toolBtnActive : toolBtnDefault
+          }`}
+        >
+          <FlipVertical2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Mask & Crop Popover (Clipping Masks, Corner Radius, Aspect Crop, Safe Zone) */}
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => togglePopover('crop')}
+          className={`${toolBtnBase} ${
+            openPopover === 'crop' || singleLayer.clipMask?.enabled
+              ? toolBtnActive
+              : toolBtnDefault
+          }`}
+          title="Clipping Mask, Aspect Crop & Bounds"
+        >
+          {singleLayer.clipMask?.enabled ? (
+            <Scissors className="h-3.5 w-3.5" />
+          ) : (
+            <Crop className="h-3.5 w-3.5" />
+          )}
+          <span>{singleLayer.clipMask?.enabled ? 'Masked' : 'Mask & Crop'}</span>
+        </button>
+
+        {openPopover === 'crop' && (
+          <div className={`${popoverClass} w-72 space-y-3`}>
+            {/* Clipping Mask Controls */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold">Clipping Mask</span>
+                {singleLayer.clipMask?.enabled && (
+                  <button
+                    type="button"
+                    onClick={() => update({ clipMask: undefined })}
+                    className="text-[10.5px] font-semibold text-red-600 dark:text-red-400 cursor-pointer"
+                  >
+                    Release Mask
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5">
+                {CLIP_MASK_SHAPES.map((m) => {
+                  const active =
+                    singleLayer.clipMask?.enabled && singleLayer.clipMask.shape === m.kind;
+                  return (
+                    <button
+                      key={m.kind}
+                      type="button"
+                      onClick={() =>
+                        update({
+                          clipMask: {
+                            enabled: true,
+                            shape: m.kind,
+                            cornerRadius: singleLayer.clipMask?.cornerRadius ?? 18,
+                            scale: singleLayer.clipMask?.scale ?? 1,
+                          },
+                        })
+                      }
+                      className={`rounded-lg border py-1 text-[10px] font-semibold cursor-pointer transition-colors ${
+                        active
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-[#E2E8F0] dark:border-[#2A2D3D] hover:bg-slate-100 dark:hover:bg-[#252836]'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {singleLayer.clipMask?.enabled && (
+                <div className="space-y-2 rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] bg-slate-50 dark:bg-[#1E202B] p-2">
                   <div>
-                    <div className="flex justify-between text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                      <span>Corner Radius</span>
-                      <span className="font-mono-num">{singleLayer.cornerRadius}px</span>
+                    <div className="flex justify-between text-[10.5px] font-medium">
+                      <span>Mask Scale</span>
+                      <span className="font-mono-num">
+                        {Math.round((singleLayer.clipMask.scale ?? 1) * 100)}%
+                      </span>
                     </div>
                     <input
                       type="range"
-                      min={0}
-                      max={64}
-                      value={singleLayer.cornerRadius}
-                      onChange={(e) => update({ cornerRadius: Number(e.target.value) })}
-                      className="mt-1 w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                      min={0.4}
+                      max={1.25}
+                      step={0.05}
+                      value={singleLayer.clipMask.scale ?? 1}
+                      onChange={(e) =>
+                        update({
+                          clipMask: {
+                            ...singleLayer.clipMask!,
+                            scale: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
                     />
                   </div>
-                )}
+                  {singleLayer.clipMask.shape === 'rounded-rect' && (
+                    <div>
+                      <div className="flex justify-between text-[10.5px] font-medium">
+                        <span>Mask Corner Radius</span>
+                        <span className="font-mono-num">
+                          {singleLayer.clipMask.cornerRadius ?? 18}px
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={64}
+                        value={singleLayer.clipMask.cornerRadius ?? 18}
+                        onChange={(e) =>
+                          update({
+                            clipMask: {
+                              ...singleLayer.clipMask!,
+                              cornerRadius: Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
-                <button
-                  type="button"
-                  onClick={fitIntoSafeZone}
-                  className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] py-1.5 text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
-                >
-                  Fit Inside 8% Safe Zone
-                </button>
+            {/* Aspect Crop */}
+            <div className="border-t border-[#E2E8F0] dark:border-[#2A2D3D] pt-2.5 space-y-2">
+              <p className="text-xs font-semibold">Aspect Crop &amp; Bounds</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {(
+                  [
+                    ['1:1', 1, 1],
+                    ['4:3', 4, 3],
+                    ['16:9', 16, 9],
+                    ['3:4', 3, 4],
+                  ] as const
+                ).map(([label, rw, rh]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => applyAspectCrop(rw, rh)}
+                    className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2D3D] py-1.5 text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            )}
+
+              {singleLayer.type === 'shape' && CORNER_ROUNDABLE_SHAPES.has(singleLayer.shapeKind) && (
+                <div>
+                  <div className="flex justify-between text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                    <span>Corner Radius</span>
+                    <span className="font-mono-num">{singleLayer.cornerRadius}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={64}
+                    value={singleLayer.cornerRadius}
+                    onChange={(e) => update({ cornerRadius: Number(e.target.value) })}
+                    className="mt-1 w-full accent-[#1B4332] dark:accent-emerald-500 cursor-pointer"
+                  />
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={fitIntoSafeZone}
+                className="w-full rounded-xl border border-[#E2E8F0] dark:border-[#2A2D3D] py-1.5 text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
+              >
+                Fit Inside 8% Safe Zone
+              </button>
+            </div>
           </div>
-        </>
-      )}
+        )}
+      </div>
 
       {/* ================================================================= */}
       {/* OPACITY + TRANSFORM POPOVER                                       */}

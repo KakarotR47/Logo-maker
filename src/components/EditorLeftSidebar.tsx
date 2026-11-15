@@ -1091,6 +1091,8 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           </p>
                           <p className="text-[10px] uppercase tracking-wider text-slate-400">
                             {layer.type}
+                            {layer.clipMask?.enabled ? ' · Masked' : ''}
+                            {layer.flipX || layer.flipY ? ' · Flipped' : ''}
                           </p>
                         </button>
 
