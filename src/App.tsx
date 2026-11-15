@@ -19,7 +19,7 @@ import { ClientPreviewView } from './components/ClientPreviewView';
 import { EditorLeftSidebar, UploadedSvgEntry } from './components/EditorLeftSidebar';
 import { ExportModal } from './components/ExportModal';
 import { LandingView } from './components/LandingView';
-import { LogoCanvasEditor } from './components/LogoCanvasEditor';
+import { CanvasToolMode, LogoCanvasEditor } from './components/LogoCanvasEditor';
 import { LogoWizardModal } from './components/LogoWizardModal';
 import { MockupPreviewView } from './components/MockupPreviewView';
 import { ProjectsDashboard } from './components/ProjectsDashboard';
@@ -84,10 +84,8 @@ import {
 } from './utils/booleanOps';
 import { ClientSharePayload, parseClientShareFromSearch } from './utils/clientShare';
 import { parseUploadedSvgToLayer } from './utils/svgExport';
-import {
-  buildDocumentFromTemplate,
-  ProTemplateSpec,
-} from './utils/templateLibrary';
+import { buildDocumentFromTemplate, ProTemplateSpec } from './utils/templateLibrary';
+import { extractLayerPathInArtboardSpace } from './utils/pathGeometry';
 import { convertTextLayerToPath } from './utils/textToPath';
 
 const BRAND_KITS_KEY = 'forma-logo-brand-kits-v1';
@@ -157,6 +155,8 @@ export default function App() {
   const [recolorStep, setRecolorStep] = useState<number>(0);
   const [incomingLogoNonce, setIncomingLogoNonce] = useState<number>(0);
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
+  const [canvasToolMode, setCanvasToolMode] = useState<CanvasToolMode>('select');
+  const [penAttachTextId, setPenAttachTextId] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
 
   // Detect standalone ?client=... share link on startup
@@ -212,6 +212,16 @@ export default function App() {
     () => activeDoc.layers.filter((l) => selectedLayerIds.includes(l.id)),
     [activeDoc.layers, selectedLayerIds]
   );
+
+  // Keep canvas tool mode aligned with active selection
+  useEffect(() => {
+    const single = selectedLayers.length === 1 ? selectedLayers[0] : null;
+    if (canvasToolMode === 'nodes' && single?.type !== 'path') {
+      setCanvasToolMode('select');
+    } else if (canvasToolMode === 'per-letter' && single?.type !== 'text') {
+      setCanvasToolMode('select');
+    }
+  }, [canvasToolMode, selectedLayers]);
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeProjectId) ?? null,
     [projects, activeProjectId]
@@ -1255,12 +1265,69 @@ export default function App() {
   }, []);
 
   const handleConvertTextToPath = async (layer: TextLayer) => {
-    const pathLayer = await convertTextLayerToPath(layer);
+    const pathLayer = await convertTextLayerToPath(layer, activeDoc.layers);
     commitDocument({
       ...activeDoc,
       layers: activeDoc.layers.map((l) => (l.id === layer.id ? pathLayer : l)),
     });
     setSelectedLayerIds([pathLayer.id]);
+    setPenAttachTextId(null);
+    setCanvasToolMode('nodes');
+    showEditorNotice(
+      'Converted to outlines · Drag anchor nodes & handles to sculpt letter serifs'
+    );
+  };
+
+  const handleTogglePenTool = () => {
+    setPenAttachTextId(null);
+    setCanvasToolMode((m) => (m === 'pen' ? 'select' : 'pen'));
+  };
+
+  const handleStartPenForText = (textLayerId: string) => {
+    setSelectedLayerIds([textLayerId]);
+    setPenAttachTextId(textLayerId);
+    setCanvasToolMode('pen');
+    showEditorNotice('Click points & drag handles on canvas to draw a custom Bezier curve');
+  };
+
+  const handleTogglePerLetterMode = () => {
+    setPenAttachTextId(null);
+    setCanvasToolMode((m) => (m === 'per-letter' ? 'select' : 'per-letter'));
+  };
+
+  const handleCreateLayerFromEditor = (
+    newLayer: LogoLayer,
+    attachToTextId?: string | null
+  ) => {
+    let nextLayers = [...activeDoc.layers, newLayer];
+    let nextSelected = [newLayer.id];
+
+    if (attachToTextId) {
+      const artboardPathD = extractLayerPathInArtboardSpace(newLayer) ?? undefined;
+      nextLayers = nextLayers.map((l) => {
+        if (l.id !== attachToTextId || l.type !== 'text') return l;
+        return {
+          ...l,
+          textWarp: undefined,
+          curveRadius: 0,
+          textPath: {
+            mode: 'layer',
+            targetLayerId: newLayer.id,
+            customPathD: artboardPathD,
+            startOffset: 50,
+            flipSide: false,
+            baselineShift: -12,
+          },
+        };
+      });
+      nextSelected = [attachToTextId];
+      showEditorNotice('Text attached to your custom Bezier curve!');
+    }
+
+    commitDocument({ ...activeDoc, layers: nextLayers });
+    setSelectedLayerIds(nextSelected);
+    setPenAttachTextId(null);
+    setCanvasToolMode('select');
   };
 
   const handleBooleanCombine = (op: BooleanOpKind) => {
@@ -1847,6 +1914,11 @@ export default function App() {
             onReorderLayer={handleReorderLayer}
             onDuplicateLayer={handleDuplicateLayer}
             onDeleteLayer={handleDeleteLayer}
+            penMode={canvasToolMode === 'pen'}
+            perLetterMode={canvasToolMode === 'per-letter'}
+            onTogglePenTool={handleTogglePenTool}
+            onStartPenForText={handleStartPenForText}
+            onTogglePerLetterMode={handleTogglePerLetterMode}
           />
 
           <div className="flex-1 flex flex-col min-w-0 min-h-[420px] lg:min-h-0">
@@ -1902,6 +1974,15 @@ export default function App() {
               onAddPage={handleAddPage}
               onRemovePage={handleRemovePage}
               onOpenMockups={() => setViewMode('mockups')}
+              canvasToolMode={canvasToolMode}
+              onChangeToolMode={(mode) => {
+                if (mode !== 'pen') setPenAttachTextId(null);
+                setCanvasToolMode(mode);
+              }}
+              penAttachTextId={penAttachTextId}
+              onTogglePenTool={handleTogglePenTool}
+              onStartPenForText={handleStartPenForText}
+              onCreateLayer={handleCreateLayerFromEditor}
             />
           </div>
 

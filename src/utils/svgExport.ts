@@ -334,7 +334,7 @@ export async function buildCleanSvgString(
   if (options.outlineText) {
     const convertedLayers = await Promise.all(
       exportDoc.layers.map(async (layer) =>
-        layer.type === 'text' ? tryConvertTextLayerToPath(layer) : layer
+        layer.type === 'text' ? tryConvertTextLayerToPath(layer, exportDoc.layers) : layer
       )
     );
     exportDoc = { ...exportDoc, layers: convertedLayers };

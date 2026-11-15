@@ -50,14 +50,26 @@ function deepCloneLayersFresh(layers: LogoLayer[]): LogoLayer[] {
       return { ...base, paths: l.paths.map((p) => ({ ...p })) };
     }
     if (base.type === 'text' && l.type === 'text') {
+      const clonedTransforms = l.letterTransforms
+        ? Object.fromEntries(
+            Object.entries(l.letterTransforms).map(([k, v]) => [k, { ...v }])
+          )
+        : undefined;
       return {
         ...base,
         textEffect: l.textEffect ? { ...l.textEffect } : undefined,
         textWarp: l.textWarp ? { ...l.textWarp } : undefined,
+        textPath: l.textPath ? { ...l.textPath } : undefined,
+        letterKerning: l.letterKerning ? { ...l.letterKerning } : undefined,
+        letterTransforms: clonedTransforms,
       };
     }
     if (base.type === 'path' && l.type === 'path') {
-      return { ...base, pathDataList: [...l.pathDataList] };
+      return {
+        ...base,
+        pathDataList: [...l.pathDataList],
+        isOpenPath: l.isOpenPath,
+      };
     }
     return base;
   });
@@ -101,6 +113,29 @@ function scaleAndCenterLayers(
     };
     if (scaled.type === 'text') {
       scaled.fontSize = Math.max(10, Math.round(scaled.fontSize * scale));
+      if (scaled.textPath) {
+        scaled.textPath = {
+          ...scaled.textPath,
+          baselineShift: Math.round(scaled.textPath.baselineShift * scale),
+        };
+      }
+      if (scaled.letterKerning) {
+        scaled.letterKerning = Object.fromEntries(
+          Object.entries(scaled.letterKerning).map(([k, v]) => [k, +(v * scale).toFixed(1)])
+        );
+      }
+      if (scaled.letterTransforms) {
+        scaled.letterTransforms = Object.fromEntries(
+          Object.entries(scaled.letterTransforms).map(([k, v]) => [
+            k,
+            {
+              ...v,
+              baselineShift:
+                v.baselineShift !== undefined ? +(v.baselineShift * scale).toFixed(1) : undefined,
+            },
+          ])
+        );
+      }
     }
     return scaled;
   });

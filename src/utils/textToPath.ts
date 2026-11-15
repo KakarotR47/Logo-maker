@@ -1,7 +1,12 @@
 import opentype from 'opentype.js';
-import { resolveEffectiveTextWarp } from '../components/CanvasLayerRenderer';
 import { FONT_OPTIONS } from '../data/logoLibrary';
 import { LogoLayer, PathLayer, TextLayer } from '../types/logo';
+import { buildWarpArcPathD, resolveWarpConfig } from './glyphLayout';
+import {
+  resolveTextPathGeometry,
+  samplePathAtDistance,
+  sampleSvgPath,
+} from './pathGeometry';
 
 const fontCache = new Map<string, Promise<opentype.Font | null>>();
 
@@ -49,20 +54,27 @@ async function loadOpentypeFont(
  * If the font TTF cannot be fetched/parsed, preserves the original TextLayer rather than
  * substituting geometric placeholder bars.
  */
-export async function tryConvertTextLayerToPath(layer: TextLayer): Promise<LogoLayer> {
+export async function tryConvertTextLayerToPath(
+  layer: TextLayer,
+  allLayers?: LogoLayer[]
+): Promise<LogoLayer> {
   const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
   if (!font) return layer;
-  return convertTextLayerToPathWithFont(layer, font);
+  return convertTextLayerToPathWithFont(layer, font, allLayers);
 }
 
 /**
  * Converts a TextLayer into a true editable vector PathLayer (`<path d="...">`)
- * using opentype.js glyph outlines (supports spacing, arcs, wave, circle & slant warps).
+ * using opentype.js glyph outlines (supports spacing, textPath curves, arcs, wave,
+ * circle, slant warps, and per-letter kerning & transforms).
  */
-export async function convertTextLayerToPath(layer: TextLayer): Promise<PathLayer> {
+export async function convertTextLayerToPath(
+  layer: TextLayer,
+  allLayers?: LogoLayer[]
+): Promise<PathLayer> {
   const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
   if (font) {
-    return convertTextLayerToPathWithFont(layer, font);
+    return convertTextLayerToPathWithFont(layer, font, allLayers);
   }
   const displayText = layer.uppercase ? layer.text.toUpperCase() : layer.text;
   const fontSize = Math.max(8, layer.fontSize);
@@ -97,6 +109,7 @@ export async function convertTextLayerToPath(layer: TextLayer): Promise<PathLaye
     opacity: layer.opacity,
     visible: layer.visible,
     locked: layer.locked,
+    groupId: layer.groupId,
     fill: layer.fill,
     fillGradient: layer.fillGradient ? { ...layer.fillGradient } : undefined,
     fillPattern: layer.fillPattern ? { ...layer.fillPattern } : undefined,
@@ -110,162 +123,206 @@ export async function convertTextLayerToPath(layer: TextLayer): Promise<PathLaye
   };
 }
 
-function cubicPointAndTangent(
-  p0: [number, number],
-  p1: [number, number],
-  p2: [number, number],
-  p3: [number, number],
-  t: number
-): { x: number; y: number; angle: number } {
-  const mt = 1 - t;
-  const x =
-    mt * mt * mt * p0[0] +
-    3 * mt * mt * t * p1[0] +
-    3 * mt * t * t * p2[0] +
-    t * t * t * p3[0];
-  const y =
-    mt * mt * mt * p0[1] +
-    3 * mt * mt * t * p1[1] +
-    3 * mt * t * t * p2[1] +
-    t * t * t * p3[1];
-  const dx =
-    3 * mt * mt * (p1[0] - p0[0]) +
-    6 * mt * t * (p2[0] - p1[0]) +
-    3 * t * t * (p3[0] - p2[0]);
-  const dy =
-    3 * mt * mt * (p1[1] - p0[1]) +
-    6 * mt * t * (p2[1] - p1[1]) +
-    3 * t * t * (p3[1] - p2[1]);
-  return { x, y, angle: Math.atan2(dy, dx) };
-}
-
-function convertTextLayerToPathWithFont(layer: TextLayer, font: opentype.Font): PathLayer {
+function convertTextLayerToPathWithFont(
+  layer: TextLayer,
+  font: opentype.Font,
+  allLayers?: LogoLayer[]
+): PathLayer {
   const displayText = layer.uppercase ? layer.text.toUpperCase() : layer.text;
   const lines = displayText.split(/\r?\n/);
 
   const fontSize = Math.max(8, layer.fontSize);
+  const fontScale = fontSize / font.unitsPerEm;
   const trackingPx = layer.letterSpacing * fontSize;
   const lineAdvance = fontSize * (layer.lineHeight || 1.15);
-  const warp = resolveEffectiveTextWarp(layer);
+  const warp = resolveWarpConfig(layer);
+  const customPath = resolveTextPathGeometry(layer, allLayers);
+  const kerningMap = layer.letterKerning ?? {};
+  const transformMap = layer.letterTransforms ?? {};
   const cx = layer.width / 2;
   const cyBox = layer.height / 2;
 
-  const hasSkew = Math.abs(warp.slant) > 0.1 || Math.abs(warp.perspective) > 0.1;
+  const hasSkew = Math.abs(warp.slant) > 0.1 || Math.abs(warp.perspective ?? 0) > 0.1;
   const pathDataList: string[] = [];
 
-  lines.forEach((line, lineIdx) => {
-    if (!line) return;
-    const baselineY = fontSize * 0.85 + lineIdx * lineAdvance;
+  const usesBuiltInWarp =
+    !customPath &&
+    (warp.mode === 'wave' ||
+      warp.mode === 'circle' ||
+      warp.mode === 'arc-up' ||
+      warp.mode === 'arc-down' ||
+      Math.abs(layer.curveRadius) >= 20);
 
-    // Measure full line width with letter-spacing
+  if (customPath || usesBuiltInWarp) {
+    const pathD = customPath ? customPath.localD : buildWarpArcPathD(layer).d;
+    const sampled = sampleSvgPath(pathD);
+    const line = lines[0] ?? '';
     const glyphs = font.stringToGlyphs(line);
-    const scale = fontSize / font.unitsPerEm;
+
     let totalWidth = 0;
-    const glyphPositions: Array<{ glyph: opentype.Glyph; x: number; adv: number }> = [];
+    const items: Array<{
+      index: number;
+      glyph: opentype.Glyph;
+      baseAdv: number;
+      adv: number;
+      charScale: number;
+      rotDeg: number;
+      bShift: number;
+      cursorStart: number;
+    }> = [];
 
     for (let i = 0; i < glyphs.length; i++) {
       const glyph = glyphs[i];
-      const adv = (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * scale;
-      glyphPositions.push({ glyph, x: totalWidth, adv });
-      totalWidth += adv + (i < glyphs.length - 1 ? trackingPx : 0);
+      const otKern =
+        i > 0 ? font.getKerningValue(glyphs[i - 1], glyph) * fontScale : 0;
+      if (i > 0) totalWidth += otKern;
+
+      const baseAdv = (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * fontScale;
+      const t = transformMap[i];
+      const charScale = Math.max(0.35, Math.min(2.6, t?.scale ?? 1));
+      const adv = baseAdv * charScale;
+      const customKern = i < glyphs.length - 1 ? kerningMap[i] ?? 0 : 0;
+
+      items.push({
+        index: i,
+        glyph,
+        baseAdv,
+        adv,
+        charScale,
+        rotDeg: t?.rotation ?? 0,
+        bShift: t?.baselineShift ?? 0,
+        cursorStart: totalWidth,
+      });
+
+      totalWidth += adv + (i < glyphs.length - 1 ? trackingPx + customKern : 0);
     }
 
-    let startX = 0;
-    if (layer.textAlign === 'center') {
-      startX = (layer.width - totalWidth) / 2;
-    } else if (layer.textAlign === 'right') {
-      startX = layer.width - totalWidth;
+    const startOffsetPct = customPath ? customPath.startOffset : 50;
+    const globalBaseShift = customPath ? customPath.baselineShift : 0;
+    const anchorDist = (startOffsetPct / 100) * sampled.totalLength;
+    const startDist =
+      layer.textAlign === 'left'
+        ? anchorDist
+        : layer.textAlign === 'right'
+          ? anchorDist - totalWidth
+          : anchorDist - totalWidth / 2;
+
+    for (const item of items) {
+      const midDist = startDist + item.cursorStart + item.adv / 2;
+      const sample = samplePathAtDistance(sampled, midDist);
+      const totalNormalShift = globalBaseShift - item.bShift;
+      const gx = sample.x + sample.nx * totalNormalShift;
+      const gy = sample.y + sample.ny * totalNormalShift;
+      const angleRad = ((sample.angleDeg + item.rotDeg) * Math.PI) / 180;
+
+      const rawPath = item.glyph.getPath(-item.baseAdv / 2, 0, fontSize);
+      let transformed = scaleRotateTranslatePath(
+        rawPath,
+        item.charScale,
+        angleRad,
+        gx,
+        gy
+      );
+      if (hasSkew) {
+        transformed = applySkewTransform(
+          transformed,
+          warp.slant,
+          warp.perspective ?? 0,
+          cx,
+          cyBox
+        );
+      }
+      const d = transformed.toPathData(2);
+      if (d) pathDataList.push(d);
     }
+  } else {
+    const totalTextHeight = lines.length * fontSize * (layer.lineHeight || 1.15);
+    const firstY = Math.max(
+      fontSize * 0.85,
+      (layer.height - totalTextHeight) / 2 + fontSize * 0.82
+    );
 
-    if (warp.mode === 'wave' && lineIdx === 0) {
-      const padX = Math.max(8, layer.width * 0.04);
-      const spanW = Math.max(40, layer.width - padX * 2);
-      const x0 = padX;
-      const xMid = padX + spanW * 0.5;
-      const xEnd = padX + spanW;
-      const amp = Math.max(6, (warp.strength / 100) * Math.min(54, Math.max(24, layer.height * 0.42)));
-      const baseY = cyBox + fontSize * 0.28;
+    let globalCharOffset = 0;
 
-      for (const item of glyphPositions) {
-        const glyphMidRel = (item.x + item.adv / 2 - totalWidth / 2) / Math.max(1, spanW) + 0.5;
-        const clampedU = Math.max(0.02, Math.min(0.98, glyphMidRel));
-        const sample =
-          clampedU <= 0.5
-            ? cubicPointAndTangent(
-                [x0, baseY],
-                [x0 + spanW * 0.17, baseY - amp],
-                [x0 + spanW * 0.33, baseY - amp],
-                [xMid, baseY],
-                clampedU * 2
-              )
-            : cubicPointAndTangent(
-                [xMid, baseY],
-                [xMid + spanW * 0.17, baseY + amp],
-                [xMid + spanW * 0.33, baseY + amp],
-                [xEnd, baseY],
-                (clampedU - 0.5) * 2
-              );
-        const rawPath = item.glyph.getPath(-item.adv / 2, 0, fontSize);
-        let transformed = rotateAndTranslatePath(rawPath, sample.angle, sample.x, sample.y);
-        if (hasSkew) {
-          transformed = applySkewTransform(transformed, warp.slant, warp.perspective, cx, cyBox);
-        }
-        const d = transformed.toPathData(2);
-        if (d) pathDataList.push(d);
+    lines.forEach((line, lineIdx) => {
+      if (!line) {
+        globalCharOffset += 1;
+        return;
       }
-    } else if (
-      (warp.mode === 'circle' ||
-        warp.mode === 'arc-up' ||
-        warp.mode === 'arc-down' ||
-        Math.abs(layer.curveRadius) >= 20) &&
-      lineIdx === 0
-    ) {
-      const isCircle = warp.mode === 'circle';
-      const minDim = Math.min(layer.width, Math.max(layer.height, layer.width * 0.55));
-      const R = isCircle
-        ? Math.max(36, (minDim * 0.44) * (1.28 - (warp.strength / 100) * 0.58))
-        : Math.max(28, Math.abs(layer.curveRadius || 140));
-      const isConvex = isCircle
-        ? true
-        : warp.mode === 'arc-down'
-          ? false
-          : warp.mode === 'arc-up'
-            ? true
-            : layer.curveRadius > 0;
-      const cy = isCircle
-        ? Math.max(R + fontSize * 0.65, cyBox)
-        : isConvex
-          ? Math.max(fontSize * 0.9, layer.height * 0.42) + R
-          : Math.min(layer.height - fontSize * 0.3, layer.height * 0.65) - R;
+      const baselineY = firstY + lineIdx * lineAdvance;
+      const glyphs = font.stringToGlyphs(line);
+      let lineWidth = 0;
+      const items: Array<{
+        glyph: opentype.Glyph;
+        cursorStart: number;
+        baseAdv: number;
+        adv: number;
+        charScale: number;
+        rotDeg: number;
+        bShift: number;
+      }> = [];
 
-      for (const item of glyphPositions) {
-        const glyphCenterX = startX + item.x + item.adv / 2;
-        const arcDist = glyphCenterX - cx;
-        const theta = arcDist / R;
+      for (let i = 0; i < glyphs.length; i++) {
+        const gIdx = globalCharOffset + i;
+        const glyph = glyphs[i];
+        const otKern =
+          i > 0 ? font.getKerningValue(glyphs[i - 1], glyph) * fontScale : 0;
+        if (i > 0) lineWidth += otKern;
 
-        const gx = cx + (isConvex ? Math.sin(theta) : -Math.sin(theta)) * R;
-        const gy = cy + (isConvex ? -Math.cos(theta) : Math.cos(theta)) * R;
-        const angle = isConvex ? theta : -theta;
+        const baseAdv = (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * fontScale;
+        const t = transformMap[gIdx];
+        const charScale = Math.max(0.35, Math.min(2.6, t?.scale ?? 1));
+        const adv = baseAdv * charScale;
+        const customKern = i < glyphs.length - 1 ? kerningMap[gIdx] ?? 0 : 0;
 
-        const rawPath = item.glyph.getPath(-item.adv / 2, 0, fontSize);
-        let transformed = rotateAndTranslatePath(rawPath, angle, gx, gy);
-        if (hasSkew) {
-          transformed = applySkewTransform(transformed, warp.slant, warp.perspective, cx, cyBox);
-        }
-        const d = transformed.toPathData(2);
-        if (d) pathDataList.push(d);
+        items.push({
+          glyph,
+          cursorStart: lineWidth,
+          baseAdv,
+          adv,
+          charScale,
+          rotDeg: t?.rotation ?? 0,
+          bShift: t?.baselineShift ?? 0,
+        });
+
+        lineWidth += adv + (i < glyphs.length - 1 ? trackingPx + customKern : 0);
       }
-    } else {
-      for (const item of glyphPositions) {
-        let p = item.glyph.getPath(startX + item.x, baselineY, fontSize);
+
+      let startX = 4;
+      if (layer.textAlign === 'center') {
+        startX = (layer.width - lineWidth) / 2;
+      } else if (layer.textAlign === 'right') {
+        startX = layer.width - 4 - lineWidth;
+      }
+
+      for (const item of items) {
+        const gx = startX + item.cursorStart + item.adv / 2;
+        const gy = baselineY - item.bShift;
+        const angleRad = (item.rotDeg * Math.PI) / 180;
+        const rawPath = item.glyph.getPath(-item.baseAdv / 2, 0, fontSize);
+        let p = scaleRotateTranslatePath(
+          rawPath,
+          item.charScale,
+          angleRad,
+          gx,
+          gy
+        );
         if (hasSkew) {
-          p = applySkewTransform(p, warp.slant, warp.perspective, cx, cyBox);
+          p = applySkewTransform(
+            p,
+            warp.slant,
+            warp.perspective ?? 0,
+            cx,
+            cyBox
+          );
         }
         const d = p.toPathData(2);
         if (d) pathDataList.push(d);
       }
-    }
-  });
+
+      globalCharOffset += glyphs.length + 1;
+    });
+  }
 
   return {
     id: layer.id,
@@ -281,6 +338,7 @@ function convertTextLayerToPathWithFont(layer: TextLayer, font: opentype.Font): 
     opacity: layer.opacity,
     visible: layer.visible,
     locked: layer.locked,
+    groupId: layer.groupId,
     fill: layer.fill,
     fillGradient: layer.fillGradient ? { ...layer.fillGradient } : undefined,
     fillPattern: layer.fillPattern ? { ...layer.fillPattern } : undefined,
@@ -336,8 +394,9 @@ function applySkewTransform(
   return out;
 }
 
-function rotateAndTranslatePath(
+function scaleRotateTranslatePath(
   path: opentype.Path,
+  scale: number,
   angleRad: number,
   tx: number,
   ty: number
@@ -346,10 +405,11 @@ function rotateAndTranslatePath(
   const sin = Math.sin(angleRad);
   const out = new opentype.Path();
 
-  const xform = (px: number, py: number): [number, number] => [
-    px * cos - py * sin + tx,
-    px * sin + py * cos + ty,
-  ];
+  const xform = (px: number, py: number): [number, number] => {
+    const sx = px * scale;
+    const sy = py * scale;
+    return [sx * cos - sy * sin + tx, sx * sin + sy * cos + ty];
+  };
 
   for (const cmd of path.commands) {
     if (cmd.type === 'M') {
@@ -374,4 +434,3 @@ function rotateAndTranslatePath(
 
   return out;
 }
-

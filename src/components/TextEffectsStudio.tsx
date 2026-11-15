@@ -1,20 +1,28 @@
 import React, { useState } from 'react';
-import { RotateCcw, Spline } from 'lucide-react';
+import { FlipVertical2, PenTool, RotateCcw, Spline, Type } from 'lucide-react';
 import {
   ColorPalette,
+  LogoLayer,
   TextEffectConfig,
   TextEffectStyleKind,
   TextLayer,
+  TextPathAttachment,
   TextWarpMode,
 } from '../types/logo';
+import { hasPerLetterEdits } from '../utils/glyphLayout';
+import { extractLayerPathInArtboardSpace } from '../utils/pathGeometry';
 import { resolveEffectiveTextWarp } from './CanvasLayerRenderer';
 
 interface TextEffectsStudioProps {
   layer: TextLayer;
   activePalette: ColorPalette;
+  docLayers?: LogoLayer[];
   onChange: (patch: Partial<TextLayer>) => void;
   onConvertTextToPath?: () => Promise<void>;
   convertingPath?: boolean;
+  perLetterMode?: boolean;
+  onTogglePerLetterMode?: () => void;
+  onStartPenForText?: () => void;
   compact?: boolean;
 }
 
@@ -71,15 +79,41 @@ function strengthToCurveRadius(mode: TextWarpMode, strength: number): number {
 export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
   layer,
   activePalette,
+  docLayers = [],
   onChange,
   onConvertTextToPath,
   convertingPath = false,
+  perLetterMode = false,
+  onTogglePerLetterMode,
+  onStartPenForText,
   compact = false,
 }) => {
   const [subTab, setSubTab] = useState<StudioSubTab>('styles');
 
   const currentEffect: TextEffectConfig = layer.textEffect ?? { style: 'none' };
   const effectiveWarp = resolveEffectiveTextWarp(layer);
+  const attachableLayers = docLayers.filter(
+    (l) =>
+      l.id !== layer.id &&
+      l.visible &&
+      (l.type === 'shape' || l.type === 'path' || l.type === 'divider' || l.type === 'custom-svg')
+  );
+
+  const patchTextPath = (patch: Partial<TextPathAttachment>) => {
+    const base: TextPathAttachment = layer.textPath ?? {
+      mode: 'preset-circle',
+      startOffset: 50,
+      flipSide: false,
+      baselineShift: 0,
+    };
+    onChange({
+      curveRadius: 0,
+      textPath: {
+        ...base,
+        ...patch,
+      },
+    });
+  };
 
   const selectEffectStyle = (style: TextEffectStyleKind) => {
     if (style === 'none') {
@@ -145,6 +179,7 @@ export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
     if (mode === 'none') {
       onChange({
         curveRadius: 0,
+        textPath: undefined,
         textWarp: {
           mode: 'none',
           strength: 0,
@@ -171,6 +206,7 @@ export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
     const nextStrength = effectiveWarp.strength > 0 ? effectiveWarp.strength : 52;
     onChange({
       curveRadius: strengthToCurveRadius(mode, nextStrength),
+      textPath: undefined,
       textWarp: {
         mode,
         strength: nextStrength,
@@ -434,7 +470,7 @@ export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
         {(
           [
             { id: 'styles', label: 'Styles' },
-            { id: 'warp', label: 'Warp & Slant' },
+            { id: 'warp', label: 'Path & Warp' },
             { id: 'finetune', label: 'Fine-Tune' },
           ] as const
         ).map((tab) => (
@@ -729,9 +765,157 @@ export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
       {/* ================================================================= */}
       {subTab === 'warp' && (
         <div className="space-y-3">
+          {/* Custom Text on Any Path Controls */}
+          <div className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] p-2.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                Text on Custom Path
+              </span>
+              {layer.textPath && (
+                <button
+                  type="button"
+                  onClick={() => onChange({ textPath: undefined })}
+                  className="text-[10.5px] font-semibold text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                >
+                  Detach
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  patchTextPath({
+                    mode: 'preset-circle',
+                    targetLayerId: undefined,
+                    customPathD: undefined,
+                  })
+                }
+                className={`rounded-lg border px-2 py-1.5 text-[10.5px] font-semibold active:scale-95 transition-all cursor-pointer ${
+                  layer.textPath?.mode === 'preset-circle'
+                    ? 'border-indigo-500 bg-indigo-600 text-white'
+                    : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-700 dark:text-slate-200 hover:border-indigo-400'
+                }`}
+              >
+                Circle Path
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  patchTextPath({
+                    mode: 'preset-wave',
+                    targetLayerId: undefined,
+                    customPathD: undefined,
+                  })
+                }
+                className={`rounded-lg border px-2 py-1.5 text-[10.5px] font-semibold active:scale-95 transition-all cursor-pointer ${
+                  layer.textPath?.mode === 'preset-wave'
+                    ? 'border-indigo-500 bg-indigo-600 text-white'
+                    : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-700 dark:text-slate-200 hover:border-indigo-400'
+                }`}
+              >
+                Wave Path
+              </button>
+            </div>
+
+            {attachableLayers.length > 0 && (
+              <div>
+                <select
+                  value={layer.textPath?.mode === 'layer' ? layer.textPath.targetLayerId ?? '' : ''}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) {
+                      onChange({ textPath: undefined });
+                      return;
+                    }
+                    const target = attachableLayers.find((l) => l.id === id);
+                    const artD = target ? extractLayerPathInArtboardSpace(target) : null;
+                    patchTextPath({
+                      mode: 'layer',
+                      targetLayerId: id,
+                      customPathD: artD ?? undefined,
+                      startOffset: layer.textPath?.startOffset ?? 50,
+                      baselineShift: layer.textPath?.baselineShift ?? -12,
+                    });
+                  }}
+                  aria-label="Attach text to canvas shape or curve"
+                  className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-2 py-1.5 text-[11px] font-medium text-slate-800 dark:text-slate-200 focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value="">Attach to Canvas Shape or Curve...</option>
+                  {attachableLayers.map((al) => (
+                    <option key={al.id} value={al.id}>
+                      {al.name} ({al.type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {onStartPenForText && (
+              <button
+                type="button"
+                onClick={onStartPenForText}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-50/80 dark:bg-indigo-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/80 dark:hover:bg-indigo-500/25 active:scale-95 transition-all cursor-pointer"
+              >
+                <PenTool className="h-3.5 w-3.5" />
+                Draw Bezier Curve with Pen Tool
+              </button>
+            )}
+
+            {layer.textPath && (
+              <div className="space-y-2 border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-2">
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-600 dark:text-slate-300">
+                    <span>Start Offset</span>
+                    <span className="font-mono-num">{Math.round(layer.textPath.startOffset)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={layer.textPath.startOffset}
+                    onChange={(e) => patchTextPath({ startOffset: Number(e.target.value) })}
+                    className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-600 dark:text-slate-300">
+                    <span>Baseline Shift</span>
+                    <span className="font-mono-num">{Math.round(layer.textPath.baselineShift)}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-60}
+                    max={60}
+                    step={1}
+                    value={layer.textPath.baselineShift}
+                    onChange={(e) => patchTextPath({ baselineShift: Number(e.target.value) })}
+                    className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => patchTextPath({ flipSide: !layer.textPath!.flipSide })}
+                  className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold active:scale-95 transition-all cursor-pointer ${
+                    layer.textPath.flipSide
+                      ? 'border-indigo-500 bg-indigo-600 text-white'
+                      : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <FlipVertical2 className="h-3.5 w-3.5" />
+                  {layer.textPath.flipSide ? 'Side Flipped (Inner / Bottom)' : 'Flip Side'}
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className={`grid ${compact ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
             {WARP_CARDS.map((card) => {
-              const active = effectiveWarp.mode === card.id;
+              const active = !layer.textPath && effectiveWarp.mode === card.id;
               return (
                 <button
                   key={card.id}
@@ -1018,6 +1202,43 @@ export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
             )}
           </div>
 
+          {/* Per-Letter Typography Controls */}
+          <div className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#1E222D] p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                Per-Letter Typography
+              </span>
+              {hasPerLetterEdits(layer) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({ letterKerning: undefined, letterTransforms: undefined })
+                  }
+                  className="text-[10.5px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                >
+                  Reset Edits
+                </button>
+              )}
+            </div>
+            {onTogglePerLetterMode && (
+              <button
+                type="button"
+                onClick={onTogglePerLetterMode}
+                className={`flex w-full items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold active:scale-95 transition-all cursor-pointer ${
+                  perLetterMode
+                    ? 'border-indigo-500 bg-indigo-600 text-white shadow-xs'
+                    : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-800 dark:text-slate-200 hover:border-indigo-400'
+                }`}
+              >
+                <Type className="h-3.5 w-3.5" />
+                {perLetterMode ? 'Exit Per-Letter Edit' : 'Per-Letter Edit Mode'}
+              </button>
+            )}
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+              Click between letters on canvas for pair kerning, or click any letter to scale, rotate, or shift its baseline.
+            </p>
+          </div>
+
           {onConvertTextToPath && (
             <button
               type="button"
@@ -1026,7 +1247,7 @@ export const TextEffectsStudio: React.FC<TextEffectsStudioProps> = ({
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-900 dark:bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:opacity-95 active:scale-95 transition-all disabled:opacity-60 cursor-pointer"
             >
               <Spline className="h-3.5 w-3.5" />
-              {convertingPath ? 'Outlining Glyphs...' : 'Convert Text to Vector Path'}
+              {convertingPath ? 'Converting to Outlines...' : 'Convert to Outlines'}
             </button>
           )}
         </div>

@@ -13,6 +13,7 @@ import {
   LayoutGrid,
   Lock,
   Palette,
+  PenTool,
   Search,
   Shapes,
   Shuffle,
@@ -118,6 +119,11 @@ interface EditorLeftSidebarProps {
   onReorderLayer: (id: string, dir: 'up' | 'down') => void;
   onDuplicateLayer: (id: string) => void;
   onDeleteLayer: (id: string) => void;
+  penMode?: boolean;
+  perLetterMode?: boolean;
+  onTogglePenTool?: () => void;
+  onStartPenForText?: (textLayerId: string) => void;
+  onTogglePerLetterMode?: () => void;
 }
 
 const RAIL_ITEMS: Array<{
@@ -169,6 +175,11 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   onReorderLayer,
   onDuplicateLayer,
   onDeleteLayer,
+  penMode = false,
+  perLetterMode = false,
+  onTogglePenTool,
+  onStartPenForText,
+  onTogglePerLetterMode,
 }) => {
   const [activeTab, setActiveTab] = useState<SidebarToolTab>('elements');
   const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
@@ -845,6 +856,26 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   </>
                 )}
 
+                {onTogglePenTool && (
+                  <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                      Vector Drawing
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={onTogglePenTool}
+                      className={`mt-2 w-full inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-all active:scale-95 cursor-pointer ${
+                        penMode
+                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                          : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#1E222D] text-slate-800 dark:text-slate-200 hover:border-indigo-400'
+                      }`}
+                    >
+                      <PenTool className="h-3.5 w-3.5" />
+                      <span>{penMode ? 'Exit Pen Tool' : 'Draw Bezier Curve (Pen Tool)'}</span>
+                    </button>
+                  </div>
+                )}
+
                 <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-3.5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                     Shapes &amp; Badges ({SHAPE_OPTIONS.length})
@@ -950,6 +981,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                         compact
                         layer={targetTextLayer}
                         activePalette={activePalette}
+                        docLayers={doc.layers}
                         onChange={(patch) =>
                           onUpdateLayer({ ...targetTextLayer, ...patch })
                         }
@@ -962,6 +994,13 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           }
                         }}
                         convertingPath={convertingTextPath}
+                        perLetterMode={perLetterMode}
+                        onTogglePerLetterMode={onTogglePerLetterMode}
+                        onStartPenForText={
+                          onStartPenForText
+                            ? () => onStartPenForText(targetTextLayer.id)
+                            : undefined
+                        }
                       />
                     </div>
                   ) : (

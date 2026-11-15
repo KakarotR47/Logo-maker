@@ -19,6 +19,40 @@ export interface BuildReleaseNote {
 
 export const STUDIO_UPDATE_LOG: BuildReleaseNote[] = [
   {
+    id: 'build-19',
+    buildLabel: 'Build 19',
+    title: 'Phase 20: Pro OpenType Typography & Text-on-Path',
+    dateLabel: 'November 2026',
+    summary:
+      'Added full custom Text-on-Path attachment (including Pen-tool Bezier curves and canvas circles), interactive Per-Letter Edit mode for independent kerning/scale/rotation/baseline shifts, and 1-click Convert to Outlines connected to a Phase 17 Vector Node Editor.',
+    changes: [
+      {
+        kind: 'added',
+        area: 'Text on Custom Path',
+        title: 'Attach Text to Circles, Waves & Pen-Tool Bezier Curves',
+        details:
+          'Draw freeform cubic Bezier curves with the Pen Tool or pick any canvas circle/shape/divider, then adjust Start Offset (0–100%), Baseline Shift (-60..60px), and Flip Side live.',
+        filesEdited: ['src/types/logo.ts', 'src/utils/pathGeometry.ts', 'src/utils/glyphLayout.ts', 'src/components/CanvasLayerRenderer.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Per-Letter Edit Mode',
+        title: 'Individual Character Kerning, Scale, Rotation & Baseline Shift',
+        details:
+          'Click gaps between any two letters to adjust pair kerning or click any individual glyph on straight or curved text to scale, rotate, or shift its vertical baseline independently.',
+        filesEdited: ['src/utils/glyphLayout.ts', 'src/components/LogoCanvasEditor.tsx', 'src/components/TextEffectsStudio.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Vector Outlines & Node Editor',
+        title: 'Convert to Outlines + Phase 17 Bezier Serif Node Editor',
+        details:
+          'Convert any text layer (including curved text-on-path & per-letter transforms) into real opentype.js vector outlines and pull/stretch individual letter serifs and cubic Bezier handles.',
+        filesEdited: ['src/utils/textToPath.ts', 'src/components/LogoCanvasEditor.tsx', 'src/components/FloatingContextToolbar.tsx', 'src/App.tsx'],
+      },
+    ],
+  },
+  {
     id: 'build-18',
     buildLabel: 'Build 18',
     title: 'Phase 14: Pro AI Magic Studio',

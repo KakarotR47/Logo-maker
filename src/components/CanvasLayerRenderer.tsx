@@ -12,192 +12,18 @@ import {
   ShapeLayer,
   TextLayer,
 } from '../types/logo';
+import {
+  buildWarpArcPathD,
+  computeTextGlyphLayout,
+  hasPerLetterEdits,
+  resolveWarpConfig,
+} from '../utils/glyphLayout';
+import { buildShapePath } from '../utils/pathGeometry';
 
-function buildRoundedPolygonPath(points: [number, number][], radius: number): string {
-  if (points.length < 3) return '';
-  if (radius <= 0.5) {
-    return `M ${points.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' L ')} Z`;
-  }
+export { buildShapePath };
+export const resolveEffectiveTextWarp = resolveWarpConfig;
+export const buildCurvedArcPath = buildWarpArcPathD;
 
-  const n = points.length;
-  const segments: string[] = [];
-
-  for (let i = 0; i < n; i++) {
-    const prev = points[(i - 1 + n) % n];
-    const curr = points[i];
-    const next = points[(i + 1) % n];
-
-    const v1x = prev[0] - curr[0];
-    const v1y = prev[1] - curr[1];
-    const v2x = next[0] - curr[0];
-    const v2y = next[1] - curr[1];
-
-    const len1 = Math.hypot(v1x, v1y);
-    const len2 = Math.hypot(v2x, v2y);
-
-    if (len1 < 0.01 || len2 < 0.01) {
-      segments.push(i === 0 ? `M ${curr[0].toFixed(1)} ${curr[1].toFixed(1)}` : `L ${curr[0].toFixed(1)} ${curr[1].toFixed(1)}`);
-      continue;
-    }
-
-    const r = Math.min(radius, len1 * 0.42, len2 * 0.42);
-    const pStartX = curr[0] + (v1x / len1) * r;
-    const pStartY = curr[1] + (v1y / len1) * r;
-    const pEndX = curr[0] + (v2x / len2) * r;
-    const pEndY = curr[1] + (v2y / len2) * r;
-
-    if (i === 0) {
-      segments.push(`M ${pStartX.toFixed(1)} ${pStartY.toFixed(1)}`);
-    } else {
-      segments.push(`L ${pStartX.toFixed(1)} ${pStartY.toFixed(1)}`);
-    }
-    segments.push(`Q ${curr[0].toFixed(1)} ${curr[1].toFixed(1)} ${pEndX.toFixed(1)} ${pEndY.toFixed(1)}`);
-  }
-
-  return `${segments.join(' ')} Z`;
-}
-
-export function buildShapePath(kind: ShapeKind, w: number, h: number, cornerRadius = 18): string {
-  const cx = w / 2;
-  const cy = h / 2;
-  const rx = w / 2;
-  const ry = h / 2;
-  const cr = Math.max(0, cornerRadius);
-
-  switch (kind) {
-    case 'circle':
-    case 'ring':
-      return `M ${cx} 2 A ${rx - 2} ${ry - 2} 0 1 0 ${cx} ${h - 2} A ${rx - 2} ${ry - 2} 0 1 0 ${cx} 2 Z`;
-    case 'rounded-rect': {
-      const r = Math.min(cr, Math.max(0, w / 2 - 2), Math.max(0, h / 2 - 2));
-      if (r <= 0.5) {
-        return `M 2 2 H ${w - 2} V ${h - 2} H 2 Z`;
-      }
-      return `M ${2 + r} 2 H ${w - 2 - r} A ${r} ${r} 0 0 1 ${w - 2} ${2 + r} V ${h - 2 - r} A ${r} ${r} 0 0 1 ${w - 2 - r} ${h - 2} H ${2 + r} A ${r} ${r} 0 0 1 2 ${h - 2 - r} V ${2 + r} A ${r} ${r} 0 0 1 ${2 + r} 2 Z`;
-    }
-    case 'pill': {
-      const r = Math.max(1, Math.min(w, h) / 2 - 2);
-      return `M ${r + 2} 2 H ${w - r - 2} A ${r} ${r} 0 0 1 ${w - r - 2} ${h - 2} H ${r + 2} A ${r} ${r} 0 0 1 ${r + 2} 2 Z`;
-    }
-    case 'hexagon': {
-      const pts: [number, number][] = [
-        [cx, 2],
-        [w - 4, h * 0.25],
-        [w - 4, h * 0.75],
-        [cx, h - 2],
-        [4, h * 0.75],
-        [4, h * 0.25],
-      ];
-      return buildRoundedPolygonPath(pts, cr);
-    }
-    case 'octagon': {
-      const ox = w * 0.29;
-      const oy = h * 0.29;
-      const pts: [number, number][] = [
-        [ox, 2],
-        [w - ox, 2],
-        [w - 2, oy],
-        [w - 2, h - oy],
-        [w - ox, h - 2],
-        [ox, h - 2],
-        [2, h - oy],
-        [2, oy],
-      ];
-      return buildRoundedPolygonPath(pts, cr);
-    }
-    case 'shield':
-      if (cr > 1) {
-        const sr = Math.min(cr * 0.35, w * 0.08, h * 0.08);
-        return `M ${(cx - sr).toFixed(1)} ${(2 + sr * 0.3).toFixed(1)} Q ${cx.toFixed(1)} 0 ${(cx + sr).toFixed(1)} ${(2 + sr * 0.3).toFixed(1)} L ${(w - 4 - sr).toFixed(1)} ${(h * 0.16 - sr * 0.3).toFixed(1)} Q ${w - 4} ${(h * 0.16).toFixed(1)} ${w - 4} ${(h * 0.16 + sr).toFixed(1)} V ${h * 0.52} C ${w - 4} ${h * 0.78}, ${w * 0.72} ${h * 0.9}, ${cx} ${h - 2} C ${w * 0.28} ${h * 0.9}, 4 ${h * 0.78}, 4 ${h * 0.52} V ${(h * 0.16 + sr).toFixed(1)} Q 4 ${(h * 0.16).toFixed(1)} ${(4 + sr).toFixed(1)} ${(h * 0.16 - sr * 0.3).toFixed(1)} Z`;
-      }
-      return `M ${cx} 2 L ${w - 4} ${h * 0.16} V ${h * 0.52} C ${w - 4} ${h * 0.78}, ${w * 0.72} ${h * 0.9}, ${cx} ${h - 2} C ${w * 0.28} ${h * 0.9}, 4 ${h * 0.78}, 4 ${h * 0.52} V ${h * 0.16} Z`;
-    case 'diamond':
-      return buildRoundedPolygonPath(
-        [
-          [cx, 2],
-          [w - 2, cy],
-          [cx, h - 2],
-          [2, cy],
-        ],
-        cr
-      );
-    case 'triangle':
-      return buildRoundedPolygonPath(
-        [
-          [cx, 4],
-          [w - 4, h - 4],
-          [4, h - 4],
-        ],
-        cr
-      );
-    case 'star': {
-      const pts: [number, number][] = [];
-      for (let i = 0; i < 16; i++) {
-        const angle = (i * Math.PI) / 8 - Math.PI / 2;
-        const radX = i % 2 === 0 ? rx - 2 : (rx - 2) * 0.45;
-        const radY = i % 2 === 0 ? ry - 2 : (ry - 2) * 0.45;
-        pts.push([cx + Math.cos(angle) * radX, cy + Math.sin(angle) * radY]);
-      }
-      return buildRoundedPolygonPath(pts, Math.min(cr * 0.3, 8));
-    }
-    case 'arch': {
-      const archR = Math.min(w / 2 - 2, h * 0.48);
-      const botR = Math.min(cr, w * 0.2, h * 0.18);
-      if (botR > 1) {
-        return `M ${2 + botR} ${h - 2} Q 2 ${h - 2} 2 ${h - 2 - botR} V ${archR + 2} A ${w / 2 - 2} ${archR} 0 0 1 ${w - 2} ${archR + 2} V ${h - 2 - botR} Q ${w - 2} ${h - 2} ${w - 2 - botR} ${h - 2} Z`;
-      }
-      return `M 2 ${h - 2} V ${archR + 2} A ${w / 2 - 2} ${archR} 0 0 1 ${w - 2} ${archR + 2} V ${h - 2} Z`;
-    }
-    case 'frame': {
-      const r = Math.min(cr, Math.max(0, w / 2 - 4), Math.max(0, h / 2 - 4));
-      if (r <= 0.5) {
-        return `M 4 4 H ${w - 4} V ${h - 4} H 4 Z`;
-      }
-      return `M ${4 + r} 4 H ${w - 4 - r} A ${r} ${r} 0 0 1 ${w - 4} ${4 + r} V ${h - 4 - r} A ${r} ${r} 0 0 1 ${w - 4 - r} ${h - 4} H ${4 + r} A ${r} ${r} 0 0 1 4 ${h - 4 - r} V ${4 + r} A ${r} ${r} 0 0 1 ${4 + r} 4 Z`;
-    }
-    case 'seal-scalloped': {
-      const teeth = 20;
-      const pts: string[] = [];
-      for (let i = 0; i < teeth * 2; i++) {
-        const angle = (i * Math.PI) / teeth - Math.PI / 2;
-        const radX = i % 2 === 0 ? rx - 2 : (rx - 2) * 0.87;
-        const radY = i % 2 === 0 ? ry - 2 : (ry - 2) * 0.87;
-        pts.push(
-          `${(cx + Math.cos(angle) * radX).toFixed(1)} ${(cy + Math.sin(angle) * radY).toFixed(1)}`
-        );
-      }
-      return `M ${pts.join(' L ')} Z`;
-    }
-    case 'crest-double':
-      if (cr > 1) {
-        const sr = Math.min(cr * 0.35, w * 0.08, h * 0.08);
-        return `M ${(cx - sr).toFixed(1)} ${(2 + sr * 0.3).toFixed(1)} Q ${cx.toFixed(1)} 0 ${(cx + sr).toFixed(1)} ${(2 + sr * 0.3).toFixed(1)} L ${(w - 4 - sr).toFixed(1)} ${(h * 0.14 - sr * 0.3).toFixed(1)} Q ${w - 4} ${(h * 0.14).toFixed(1)} ${w - 4} ${(h * 0.14 + sr).toFixed(1)} V ${h * 0.5} C ${w - 4} ${h * 0.78}, ${w * 0.72} ${h * 0.91}, ${cx} ${h - 2} C ${w * 0.28} ${h * 0.91}, 4 ${h * 0.78}, 4 ${h * 0.5} V ${(h * 0.14 + sr).toFixed(1)} Q 4 ${(h * 0.14).toFixed(1)} ${(4 + sr).toFixed(1)} ${(h * 0.14 - sr * 0.3).toFixed(1)} Z`;
-      }
-      return `M ${cx} 2 L ${w - 4} ${h * 0.14} V ${h * 0.5} C ${w - 4} ${h * 0.78}, ${w * 0.72} ${h * 0.91}, ${cx} ${h - 2} C ${w * 0.28} ${h * 0.91}, 4 ${h * 0.78}, 4 ${h * 0.5} V ${h * 0.14} Z`;
-    case 'ribbon-banner':
-      return buildRoundedPolygonPath(
-        [
-          [4, h * 0.18],
-          [w - 4, h * 0.18],
-          [w - 18, cy],
-          [w - 4, h * 0.82],
-          [4, h * 0.82],
-          [18, cy],
-        ],
-        Math.min(cr * 0.45, 14)
-      );
-    case 'parallelogram':
-      return buildRoundedPolygonPath(
-        [
-          [w * 0.16, 4],
-          [w - 4, 4],
-          [w * 0.84, h - 4],
-          [4, h - 4],
-        ],
-        cr
-      );
-  }
-}
 
 export function buildDividerPrimitives(
   kind: DividerKind,
@@ -262,95 +88,7 @@ export function buildDividerPrimitives(
   }
 }
 
-export function resolveEffectiveTextWarp(layer: TextLayer): {
-  mode: 'none' | 'arc-up' | 'arc-down' | 'circle' | 'wave' | 'slant';
-  strength: number;
-  slant: number;
-  perspective: number;
-} {
-  if (layer.textWarp) {
-    return {
-      mode: layer.textWarp.mode,
-      strength: layer.textWarp.strength ?? 0,
-      slant: layer.textWarp.slant ?? 0,
-      perspective: layer.textWarp.perspective ?? 0,
-    };
-  }
-  if (Math.abs(layer.curveRadius) >= 20) {
-    const strength = Math.max(8, Math.min(100, Math.round(((260 - Math.abs(layer.curveRadius)) / 240) * 100)));
-    return {
-      mode: layer.curveRadius > 0 ? 'arc-up' : 'arc-down',
-      strength,
-      slant: 0,
-      perspective: 0,
-    };
-  }
-  return { mode: 'none', strength: 0, slant: 0, perspective: 0 };
-}
 
-export function buildCurvedArcPath(
-  layer: TextLayer
-): { d: string; startOffset: string; textAnchor: 'start' | 'middle' | 'end' } {
-  const warp = resolveEffectiveTextWarp(layer);
-  const cx = layer.width / 2;
-  const cyBox = layer.height / 2;
-
-  if (warp.mode === 'wave') {
-    const padX = Math.max(8, layer.width * 0.04);
-    const spanW = Math.max(40, layer.width - padX * 2);
-    const x0 = padX;
-    const xMid = padX + spanW * 0.5;
-    const xEnd = padX + spanW;
-    const amp = Math.max(6, (warp.strength / 100) * Math.min(54, Math.max(24, layer.height * 0.42)));
-    const baseY = cyBox + layer.fontSize * 0.28;
-    const d = `M ${x0.toFixed(1)} ${baseY.toFixed(1)} C ${(x0 + spanW * 0.17).toFixed(1)} ${(baseY - amp).toFixed(1)}, ${(x0 + spanW * 0.33).toFixed(1)} ${(baseY - amp).toFixed(1)}, ${xMid.toFixed(1)} ${baseY.toFixed(1)} C ${(xMid + spanW * 0.17).toFixed(1)} ${(baseY + amp).toFixed(1)}, ${(xMid + spanW * 0.33).toFixed(1)} ${(baseY + amp).toFixed(1)}, ${xEnd.toFixed(1)} ${baseY.toFixed(1)}`;
-    return { d, startOffset: '50%', textAnchor: 'middle' };
-  }
-
-  if (warp.mode === 'circle') {
-    const minDim = Math.min(layer.width, Math.max(layer.height, layer.width * 0.55));
-    const R = Math.max(36, (minDim * 0.44) * (1.28 - (warp.strength / 100) * 0.58));
-    const circleCy = Math.max(R + layer.fontSize * 0.65, cyBox);
-    // Start near bottom so 50% middle lands centered cleanly at top apex of circle ring
-    const d = `M ${cx.toFixed(1)} ${(circleCy + R).toFixed(1)} A ${R.toFixed(1)} ${R.toFixed(1)} 0 1 1 ${(cx - 0.1).toFixed(1)} ${(circleCy + R).toFixed(1)}`;
-    return { d, startOffset: '50%', textAnchor: 'middle' };
-  }
-
-  const R = Math.max(28, Math.abs(layer.curveRadius || 140));
-  const isConvex = warp.mode === 'arc-down' ? false : warp.mode === 'arc-up' ? true : layer.curveRadius > 0;
-
-  // Allow wrapping up to ~305 degrees around circular badges & seals
-  const halfSpanAngle = Math.min(Math.PI * 0.85, Math.max(0.45, (layer.width * 0.46) / R));
-  const largeArcFlag = halfSpanAngle * 2 > Math.PI ? 1 : 0;
-
-  if (isConvex) {
-    // Keep top apex cleanly anchored inside text layer bounds
-    const apexY = Math.max(layer.fontSize * 0.9, layer.height * 0.42);
-    const cy = apexY + R;
-    const x1 = cx - Math.sin(halfSpanAngle) * R;
-    const y1 = cy - Math.cos(halfSpanAngle) * R;
-    const x2 = cx + Math.sin(halfSpanAngle) * R;
-    const y2 = cy - Math.cos(halfSpanAngle) * R;
-    return {
-      d: `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${largeArcFlag} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`,
-      startOffset: '50%',
-      textAnchor: 'middle',
-    };
-  }
-
-  // Concave smile arc: anchor bottom apex cleanly inside bounds
-  const bottomApexY = Math.min(layer.height - layer.fontSize * 0.3, layer.height * 0.65);
-  const cy = bottomApexY - R;
-  const x1 = cx - Math.sin(halfSpanAngle) * R;
-  const y1 = cy + Math.cos(halfSpanAngle) * R;
-  const x2 = cx + Math.sin(halfSpanAngle) * R;
-  const y2 = cy + Math.cos(halfSpanAngle) * R;
-  return {
-    d: `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${largeArcFlag} 0 ${x2.toFixed(1)} ${y2.toFixed(1)}`,
-    startOffset: '50%',
-    textAnchor: 'middle',
-  };
-}
 
 function buildPatternDef(layer: LogoLayer, idPrefix: string): {
   fillAttr: string;
@@ -604,9 +342,10 @@ interface RenderLayerProps {
   layer: LogoLayer;
   docBg: string;
   idPrefix: string;
+  allLayers?: LogoLayer[];
 }
 
-export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(({ layer, docBg, idPrefix }) => {
+export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(({ layer, docBg, idPrefix, allLayers }) => {
   if (!layer.visible) return null;
 
   const cx = layer.x + layer.width / 2;
@@ -633,7 +372,7 @@ export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(({ layer, 
       case 'divider':
         return renderDivider(layer, fillAttr);
       case 'text':
-        return renderText(layer, `${idPrefix}-arc-${layer.id}`, fillAttr);
+        return renderText(layer, `${idPrefix}-arc-${layer.id}`, fillAttr, allLayers);
       case 'path':
         return renderPathLayer(layer, fillAttr);
       case 'custom-svg':
@@ -796,19 +535,29 @@ function buildTextSkewTransform(layer: TextLayer): string | undefined {
   return ops.join(' ');
 }
 
-function renderText(layer: TextLayer, idBase: string, fillAttr: string) {
+function renderText(
+  layer: TextLayer,
+  idBase: string,
+  fillAttr: string,
+  allLayers?: LogoLayer[]
+) {
   const arcPathId = `${idBase}-path`;
   const raw = layer.uppercase ? layer.text.toUpperCase() : layer.text;
   const lines = raw.split(/\r?\n/);
   const warp = resolveEffectiveTextWarp(layer);
+  const usesCustomTextPath = Boolean(layer.textPath);
+  const usesPerLetterLayout = usesCustomTextPath || hasPerLetterEdits(layer);
+
   const usesWarpPath =
-    warp.mode === 'arc-up' ||
-    warp.mode === 'arc-down' ||
-    warp.mode === 'circle' ||
-    warp.mode === 'wave' ||
-    (warp.mode === 'none' && Math.abs(layer.curveRadius) >= 20);
+    !usesPerLetterLayout &&
+    (warp.mode === 'arc-up' ||
+      warp.mode === 'arc-down' ||
+      warp.mode === 'circle' ||
+      warp.mode === 'wave' ||
+      (warp.mode === 'none' && Math.abs(layer.curveRadius) >= 20));
 
   const arc = usesWarpPath ? buildCurvedArcPath(layer) : null;
+  const perLetterLayout = usesPerLetterLayout ? computeTextGlyphLayout(layer, allLayers) : null;
   const skewTransform = buildTextSkewTransform(layer);
 
   const anchor: 'start' | 'middle' | 'end' =
@@ -846,6 +595,40 @@ function renderText(layer: TextLayer, idBase: string, fillAttr: string) {
       opts.dxOffset || opts.dyOffset
         ? `translate(${(opts.dxOffset ?? 0).toFixed(2)}, ${(opts.dyOffset ?? 0).toFixed(2)})`
         : undefined;
+
+    if (usesPerLetterLayout && perLetterLayout) {
+      return (
+        <g
+          key={opts.key}
+          transform={translateStr}
+          fill={opts.fill}
+          fillOpacity={opts.opacity}
+          stroke={opts.stroke ?? 'none'}
+          strokeWidth={opts.strokeWidth ?? 0}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          paintOrder="stroke fill"
+          filter={opts.filter}
+        >
+          {perLetterLayout.glyphs.map((g) => (
+            <text
+              key={`${opts.key}-g-${g.index}`}
+              x={0}
+              y={0}
+              textAnchor="middle"
+              transform={`translate(${g.x.toFixed(2)}, ${g.y.toFixed(2)}) rotate(${g.angleDeg.toFixed(2)}) scale(${g.scale.toFixed(3)})`}
+              fontFamily={layer.fontFamily}
+              fontWeight={layer.fontWeight}
+              fontStyle={layer.fontStyle}
+              fontSize={layer.fontSize}
+              style={{ userSelect: 'none' }}
+            >
+              {g.char === ' ' ? '\u00A0' : g.char}
+            </text>
+          ))}
+        </g>
+      );
+    }
 
     if (usesWarpPath && arc) {
       return (
@@ -1101,16 +884,34 @@ function renderText(layer: TextLayer, idBase: string, fillAttr: string) {
 function renderPathLayer(layer: PathLayer, fillAttr: string) {
   const sx = layer.width / Math.max(1, layer.sourceViewBox.width);
   const sy = layer.height / Math.max(1, layer.sourceViewBox.height);
+  const isOpen = Boolean(layer.isOpenPath) && (layer.fill === 'transparent' || layer.fill === 'none');
+  const resolvedFill = isOpen ? 'none' : fillAttr;
+  const resolvedStroke =
+    layer.strokeWidth > 0 && layer.stroke !== 'none'
+      ? layer.stroke
+      : isOpen
+        ? fillAttr !== 'transparent' && fillAttr !== 'none'
+          ? fillAttr
+          : '#141413'
+        : 'none';
+  const resolvedStrokeW =
+    layer.strokeWidth > 0
+      ? layer.strokeWidth / Math.max(0.3, sx)
+      : isOpen
+        ? 4 / Math.max(0.3, sx)
+        : 0;
+
   return (
     <g transform={`scale(${sx}, ${sy})`}>
       {layer.pathDataList.map((d, idx) => (
         <path
           key={idx}
           d={d}
-          fill={fillAttr}
+          fill={resolvedFill}
           fillRule={layer.fillRule ?? 'nonzero'}
-          stroke={layer.strokeWidth > 0 ? layer.stroke : 'none'}
-          strokeWidth={layer.strokeWidth > 0 ? layer.strokeWidth / Math.max(0.3, sx) : 0}
+          stroke={resolvedStroke}
+          strokeWidth={resolvedStrokeW}
+          strokeLinecap="round"
           strokeLinejoin="round"
           paintOrder="stroke fill"
         />
@@ -1198,6 +999,7 @@ export const LogoDocumentSvg: React.FC<DocumentSvgProps> = React.memo(({
           layer={layer}
           docBg={bg}
           idPrefix={idPrefix}
+          allLayers={doc.layers}
         />
       ))}
     </svg>

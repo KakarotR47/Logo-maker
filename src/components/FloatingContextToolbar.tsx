@@ -36,6 +36,7 @@ import {
   Shuffle,
   SlidersHorizontal,
   Sparkles,
+  Spline,
   Trash2,
   Type,
   Unlock,
@@ -52,7 +53,9 @@ import {
   LogoLayer,
   ShapeKind,
   TextLayer,
+  TextPathAttachment,
 } from '../types/logo';
+import { extractLayerPathInArtboardSpace } from '../utils/pathGeometry';
 import { BooleanOpKind, isCombinableVectorLayer } from '../utils/booleanOps';
 import {
   batchLoadGoogleFonts,
@@ -70,6 +73,7 @@ type ContextPopoverId =
   | 'text-edit'
   | 'font'
   | 'tracking'
+  | 'text-path'
   | 'fill'
   | 'stroke'
   | 'radius'
@@ -130,6 +134,13 @@ interface FloatingContextToolbarProps {
   onGroupSelected?: () => void;
   onUngroupSelected?: () => void;
   onToggleBackgroundLock?: () => void;
+  penMode?: boolean;
+  onTogglePenTool?: () => void;
+  onStartPenForText?: (textLayerId: string) => void;
+  nodeEditMode?: boolean;
+  onToggleNodeEditMode?: () => void;
+  perLetterMode?: boolean;
+  onTogglePerLetterMode?: () => void;
 }
 
 const FONT_CATEGORY_FILTERS = ['All', 'Sans', 'Serif', 'Display', 'Script', 'Mono'] as const;
@@ -184,6 +195,13 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
   onGroupSelected,
   onUngroupSelected,
   onToggleBackgroundLock,
+  penMode = false,
+  onTogglePenTool,
+  onStartPenForText,
+  nodeEditMode = false,
+  onToggleNodeEditMode,
+  perLetterMode = false,
+  onTogglePerLetterMode,
 }) => {
   const [openPopover, setOpenPopover] = useState<ContextPopoverId | null>(null);
   const [convertingPath, setConvertingPath] = useState(false);
@@ -425,6 +443,18 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
                     ? '3rds'
                     : 'φ Ratio'}
             </span>
+          </button>
+        )}
+
+        {onTogglePenTool && (
+          <button
+            type="button"
+            onClick={onTogglePenTool}
+            title="Draw custom Bezier curve (Pen Tool)"
+            className={`${toolBtnBase} ${penMode ? toolBtnActive : toolBtnDefault}`}
+          >
+            <PenTool className="h-3.5 w-3.5" />
+            <span>{penMode ? 'Drawing Path' : 'Pen Tool'}</span>
           </button>
         )}
 
@@ -1580,9 +1610,256 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
               </div>
             )}
           </div>
+
+          {/* Text on Custom Path Popover */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => togglePopover('text-path')}
+              className={`${toolBtnBase} ${
+                openPopover === 'text-path' || Boolean(singleLayer.textPath)
+                  ? toolBtnActive
+                  : toolBtnDefault
+              }`}
+              title="Attach text onto circle, wave, shape, or custom Bezier curve"
+            >
+              <Spline className="h-3.5 w-3.5" />
+              <span>On Path</span>
+            </button>
+
+            {openPopover === 'text-path' && (() => {
+              const attachable = doc.layers.filter(
+                (l) =>
+                  l.id !== singleLayer.id &&
+                  l.visible &&
+                  (l.type === 'shape' ||
+                    l.type === 'path' ||
+                    l.type === 'divider' ||
+                    l.type === 'custom-svg')
+              );
+              const tp = singleLayer.textPath;
+              const setAttachment = (next: TextPathAttachment | undefined) => {
+                update({
+                  textPath: next,
+                  ...(next
+                    ? {
+                        textWarp: undefined,
+                        curveRadius: 0,
+                      }
+                    : {}),
+                });
+              };
+              const updateAttachment = (patch: Partial<TextPathAttachment>) => {
+                if (!tp) return;
+                update({ textPath: { ...tp, ...patch } });
+              };
+
+              return (
+                <div className={`${popoverClass} w-72 space-y-2.5`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold">Text on Custom Path</span>
+                    {tp && (
+                      <button
+                        type="button"
+                        onClick={() => setAttachment(undefined)}
+                        className="text-[10.5px] font-semibold text-red-600 dark:text-red-400 cursor-pointer"
+                      >
+                        Detach
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAttachment({
+                          mode: 'preset-circle',
+                          startOffset: 50,
+                          flipSide: false,
+                          baselineShift: 0,
+                        })
+                      }
+                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold cursor-pointer ${
+                        tp?.mode === 'preset-circle'
+                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                          : 'border-[#E2E8F0] dark:border-[#2A2F3D] hover:bg-slate-100 dark:hover:bg-[#252A38]'
+                      }`}
+                    >
+                      Circle Path
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAttachment({
+                          mode: 'preset-wave',
+                          startOffset: 50,
+                          flipSide: false,
+                          baselineShift: 0,
+                        })
+                      }
+                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold cursor-pointer ${
+                        tp?.mode === 'preset-wave'
+                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                          : 'border-[#E2E8F0] dark:border-[#2A2F3D] hover:bg-slate-100 dark:hover:bg-[#252A38]'
+                      }`}
+                    >
+                      Wave Path
+                    </button>
+                  </div>
+
+                  {attachable.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+                        Attach to Canvas Shape / Curve
+                      </span>
+                      <select
+                        value={tp?.mode === 'layer' ? tp.targetLayerId ?? '' : ''}
+                        onChange={(e) => {
+                          const tid = e.target.value;
+                          if (!tid) return;
+                          const target = attachable.find((l) => l.id === tid);
+                          const customPathD = target
+                            ? extractLayerPathInArtboardSpace(target) ?? undefined
+                            : undefined;
+                          setAttachment({
+                            mode: 'layer',
+                            targetLayerId: tid,
+                            customPathD,
+                            startOffset: tp?.startOffset ?? 50,
+                            flipSide: tp?.flipSide ?? false,
+                            baselineShift: tp?.baselineShift ?? -12,
+                          });
+                        }}
+                        className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-1.5 text-[11px] font-medium focus:border-indigo-500 focus:outline-none"
+                      >
+                        <option value="">Select shape or Pen curve...</option>
+                        {attachable.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name} ({l.type})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {onStartPenForText && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenPopover(null);
+                        onStartPenForText(singleLayer.id);
+                      }}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-200 dark:border-indigo-500/40 bg-indigo-50/70 dark:bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 cursor-pointer"
+                    >
+                      <PenTool className="h-3 w-3" />
+                      Draw Bezier Curve with Pen Tool
+                    </button>
+                  )}
+
+                  {tp && (
+                    <div className="space-y-2 border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-2">
+                      <div>
+                        <div className="flex justify-between text-[10.5px] font-medium">
+                          <span>Start Offset</span>
+                          <span className="font-mono-num text-indigo-600 dark:text-indigo-400">
+                            {Math.round(tp.startOffset)}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={tp.startOffset}
+                          onChange={(e) =>
+                            updateAttachment({ startOffset: Number(e.target.value) })
+                          }
+                          className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-[10.5px] font-medium">
+                          <span>Baseline Shift</span>
+                          <span className="font-mono-num text-indigo-600 dark:text-indigo-400">
+                            {tp.baselineShift}px
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={-60}
+                          max={60}
+                          step={1}
+                          value={tp.baselineShift}
+                          onChange={(e) =>
+                            updateAttachment({ baselineShift: Number(e.target.value) })
+                          }
+                          className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => updateAttachment({ flipSide: !tp.flipSide })}
+                        className={`w-full inline-flex items-center justify-center gap-1.5 rounded-lg border py-1.5 text-[11px] font-semibold cursor-pointer ${
+                          tp.flipSide
+                            ? 'border-indigo-600 bg-indigo-600 text-white'
+                            : 'border-[#E2E8F0] dark:border-[#2A2F3D] hover:bg-slate-100 dark:hover:bg-[#252A38]'
+                        }`}
+                      >
+                        <FlipVertical2 className="h-3.5 w-3.5" />
+                        Flip Side
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Per-Letter Kerning & Transform Edit Mode */}
+          {onTogglePerLetterMode && (
+            <button
+              type="button"
+              onClick={onTogglePerLetterMode}
+              title="Per-Letter Edit: Click between letters to adjust kerning, or click a letter to scale/rotate/shift baseline"
+              className={`${toolBtnBase} ${perLetterMode ? toolBtnActive : toolBtnDefault}`}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Per-Letter</span>
+            </button>
+          )}
+
+          {/* Convert Text to Editable Vector Outlines */}
+          <button
+            type="button"
+            onClick={() => void handleConvertPath()}
+            disabled={convertingPath}
+            title="Convert to Outlines (pull & stretch individual letter serifs in Node Editor)"
+            className={`${toolBtnBase} ${toolBtnDefault} disabled:opacity-50`}
+          >
+            <PenTool className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden sm:inline">
+              {convertingPath ? 'Converting...' : 'Outlines'}
+            </span>
+          </button>
         </>
       ) : (
         <>
+          {/* Phase 17 Node Editor toggle for Vector Path layers */}
+          {singleLayer.type === 'path' && onToggleNodeEditMode && (
+            <button
+              type="button"
+              onClick={onToggleNodeEditMode}
+              title="Edit Bezier Nodes & Serifs (Phase 17 Node Editor)"
+              className={`${toolBtnBase} ${nodeEditMode ? toolBtnActive : toolBtnDefault}`}
+            >
+              <Spline className="h-3.5 w-3.5" />
+              <span>{nodeEditMode ? 'Done Nodes' : 'Edit Nodes'}</span>
+            </button>
+          )}
+
           {/* Stroke Popover for Shapes / Icons / SVGs / Paths */}
           <div className="relative">
             <button
@@ -2040,9 +2317,20 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
               <TextEffectsStudio
                 layer={singleLayer}
                 activePalette={activePalette}
+                docLayers={doc.layers}
                 onChange={(patch) => update(patch)}
                 onConvertTextToPath={handleConvertPath}
                 convertingPath={convertingPath}
+                perLetterMode={perLetterMode}
+                onTogglePerLetterMode={onTogglePerLetterMode}
+                onStartPenForText={
+                  onStartPenForText
+                    ? () => {
+                        setOpenPopover(null);
+                        onStartPenForText(singleLayer.id);
+                      }
+                    : undefined
+                }
               />
             ) : (
               /* Drop Shadow Controls for Shapes / Icons / Paths */

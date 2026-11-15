@@ -7,11 +7,14 @@ import {
   FolderPlus,
   Grid3x3,
   Maximize2,
+  PenTool,
   Plus,
   RotateCcw,
   Ruler,
   Scan,
   Scissors,
+  SlidersHorizontal,
+  Spline,
   X,
   ZoomIn,
   ZoomOut,
@@ -21,6 +24,7 @@ import {
   FontPairing,
   LogoDocument,
   LogoLayer,
+  PathLayer,
   TextLayer,
 } from '../types/logo';
 import {
@@ -28,8 +32,21 @@ import {
   checkSafeZoneViolations,
 } from '../utils/contrastChecker';
 import { BooleanOpKind } from '../utils/booleanOps';
+import { computeTextGlyphLayout } from '../utils/glyphLayout';
+import {
+  EditableNode,
+  EditableSubpath,
+  getSubpathsBounds,
+  mapArtboardPointToLocal,
+  mapLocalPointToArtboard,
+  parseSvgPathToSubpaths,
+  refitPathLayerAfterNodeEdit,
+  serializeSubpathsToPathData,
+} from '../utils/pathGeometry';
 import { CanvasLayerNode } from './CanvasLayerRenderer';
 import { FloatingContextToolbar } from './FloatingContextToolbar';
+
+export type CanvasToolMode = 'select' | 'pen' | 'nodes' | 'per-letter';
 
 interface SnapGuide {
   axis: 'x' | 'y';
@@ -102,6 +119,12 @@ interface LogoCanvasEditorProps {
   onAddPage: () => void;
   onRemovePage: (index: number) => void;
   onOpenMockups?: () => void;
+  canvasToolMode?: CanvasToolMode;
+  onChangeToolMode?: (mode: CanvasToolMode) => void;
+  penAttachTextId?: string | null;
+  onTogglePenTool?: () => void;
+  onStartPenForText?: (textLayerId: string) => void;
+  onCreateLayer?: (layer: LogoLayer, attachToTextId?: string | null) => void;
 }
 
 export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
@@ -147,6 +170,12 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onAddPage,
   onRemovePage,
   onOpenMockups,
+  canvasToolMode = 'select',
+  onChangeToolMode,
+  penAttachTextId = null,
+  onTogglePenTool,
+  onStartPenForText,
+  onCreateLayer,
 }) => {
   const [zoom, setZoom] = useState<number>(1);
   const [gridMode, setGridMode] = useState<'off' | 'square' | 'thirds' | 'golden'>('square');
@@ -165,6 +194,50 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     viewW: number;
     viewH: number;
   }>({ originX: 40, originY: 40, viewW: 900, viewH: 700 });
+
+  // Phase 20: Pen Tool draft, Phase 17 Node Editor state, and Per-Letter Edit state
+  const [penDraft, setPenDraft] = useState<{
+    nodes: EditableNode[];
+    cursor: { x: number; y: number } | null;
+  } | null>(null);
+  const penHandleDragRef = useRef<{
+    anchorX: number;
+    anchorY: number;
+    nodeIndex: number;
+  } | null>(null);
+
+  const [nodeEditorPaths, setNodeEditorPaths] = useState<EditableSubpath[][]>([]);
+  const [selectedNode, setSelectedNode] = useState<{
+    pathIdx: number;
+    subIdx: number;
+    nodeIdx: number;
+  } | null>(null);
+  const nodeDragRef = useRef<{
+    pathIdx: number;
+    subIdx: number;
+    nodeIdx: number;
+    part: 'anchor' | 'handleIn' | 'handleOut';
+    beforeLayer: PathLayer;
+    workingPaths: EditableSubpath[][];
+    currentList: string[];
+    moved: boolean;
+  } | null>(null);
+
+  const [perLetterTarget, setPerLetterTarget] = useState<{
+    kind: 'letter' | 'gap';
+    index: number;
+  } | null>(null);
+  const perLetterDragRef = useRef<{
+    kind: 'letter' | 'gap';
+    index: number;
+    startClientX: number;
+    startClientY: number;
+    startVal: number;
+    gapAngleRad: number;
+    beforeLayer: TextLayer;
+    currentLayer: TextLayer;
+    moved: boolean;
+  } | null>(null);
 
   const showGrid = gridMode !== 'off';
 
@@ -187,9 +260,14 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     showGrid,
     selectedLayerIds,
     editingTextId,
+    canvasToolMode,
+    penDraft,
+    selectedNode,
+    nodeEditorPaths,
     onSelectLayers,
     onPreviewLayersChange,
     onCommitLayersChange,
+    onUpdateLayer,
     onUndo,
     onRedo,
     onDeleteSelected,
@@ -197,6 +275,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     onNudgeSelected,
     onGroupSelected,
     onUngroupSelected,
+    onChangeToolMode,
   });
   latestRef.current = {
     doc,
@@ -204,9 +283,14 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     showGrid,
     selectedLayerIds,
     editingTextId,
+    canvasToolMode,
+    penDraft,
+    selectedNode,
+    nodeEditorPaths,
     onSelectLayers,
     onPreviewLayersChange,
     onCommitLayersChange,
+    onUpdateLayer,
     onUndo,
     onRedo,
     onDeleteSelected,
@@ -214,6 +298,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     onNudgeSelected,
     onGroupSelected,
     onUngroupSelected,
+    onChangeToolMode,
   };
 
   const selectedSet = useMemo(() => new Set(selectedLayerIds), [selectedLayerIds]);
@@ -244,6 +329,42 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   }, [selectedLayers]);
 
   const singleSelected = selectedLayers.length === 1 ? selectedLayers[0] : null;
+  const singlePathLayer = singleSelected?.type === 'path' ? singleSelected : null;
+  const singleTextLayer = singleSelected?.type === 'text' ? singleSelected : null;
+
+  const perLetterLayout = useMemo(() => {
+    if (canvasToolMode !== 'per-letter' || !singleTextLayer) return null;
+    return computeTextGlyphLayout(singleTextLayer, doc.layers);
+  }, [canvasToolMode, singleTextLayer, doc.layers]);
+
+  // Clear Pen Tool draft when exiting pen mode
+  useEffect(() => {
+    if (canvasToolMode !== 'pen') {
+      setPenDraft(null);
+      penHandleDragRef.current = null;
+    }
+  }, [canvasToolMode]);
+
+  // Sync parsed subpaths when entering Phase 17 Node Editor or switching selected path layer
+  const nodePathSignature = singlePathLayer ? singlePathLayer.pathDataList.join('||') : '';
+  useEffect(() => {
+    if (canvasToolMode !== 'nodes' || !singlePathLayer) {
+      setNodeEditorPaths([]);
+      setSelectedNode(null);
+      return;
+    }
+    if (nodeDragRef.current) return;
+    setNodeEditorPaths(singlePathLayer.pathDataList.map((d) => parseSvgPathToSubpaths(d)));
+  }, [canvasToolMode, singlePathLayer?.id, nodePathSignature]);
+
+  // Initialize Per-Letter target when entering Per-Letter mode
+  useEffect(() => {
+    if (canvasToolMode !== 'per-letter' || !singleTextLayer) {
+      setPerLetterTarget(null);
+      return;
+    }
+    setPerLetterTarget((prev) => prev ?? { kind: 'letter', index: 0 });
+  }, [canvasToolMode, singleTextLayer?.id]);
 
   const contrastReport = useMemo(
     () => analyzeDocumentContrast(doc, activePalette),
@@ -641,6 +762,38 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
       const cur = latestRef.current;
       if (cur.editingTextId) return;
 
+      if (e.key === 'Escape' && cur.canvasToolMode !== 'select') {
+        e.preventDefault();
+        setPenDraft(null);
+        cur.onChangeToolMode?.('select');
+        return;
+      }
+
+      if (cur.canvasToolMode === 'pen') {
+        if (e.key === 'Enter' && cur.penDraft && cur.penDraft.nodes.length >= 2) {
+          e.preventDefault();
+          commitPenPathRef.current?.(cur.penDraft.nodes, false);
+          return;
+        }
+        if ((e.key === 'Backspace' || e.key === 'Delete') && cur.penDraft) {
+          e.preventDefault();
+          setPenDraft((prev) =>
+            prev && prev.nodes.length > 1
+              ? { ...prev, nodes: prev.nodes.slice(0, -1) }
+              : null
+          );
+          return;
+        }
+      }
+
+      if (cur.canvasToolMode === 'nodes' && (e.key === 'Delete' || e.key === 'Backspace')) {
+        if (cur.selectedNode) {
+          e.preventDefault();
+          deleteSelectedNodeRef.current?.();
+          return;
+        }
+      }
+
       const mod = e.metaKey || e.ctrlKey;
 
       if (mod && e.key.toLowerCase() === 'z') {
@@ -707,6 +860,419 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // =========================================================================
+  // PHASE 20 & PHASE 17 HELPERS: PEN TOOL, NODE EDITOR, PER-LETTER EDIT
+  // =========================================================================
+
+  const commitPenPath = useCallback(
+    (nodes: EditableNode[], closed: boolean) => {
+      if (nodes.length < 2) {
+        setPenDraft(null);
+        return;
+      }
+      const pad = closed ? 8 : 14;
+      const b = getSubpathsBounds([{ closed, nodes }]);
+      const ox = b.minX - pad;
+      const oy = b.minY - pad;
+      const vw = Math.max(24, b.width + pad * 2);
+      const vh = Math.max(24, b.height + pad * 2);
+      const localD = serializeSubpathsToPathData([
+        {
+          closed,
+          nodes: nodes.map((n) => ({
+            x: n.x - ox,
+            y: n.y - oy,
+            handleIn: n.handleIn ? { x: n.handleIn.x - ox, y: n.handleIn.y - oy } : null,
+            handleOut: n.handleOut ? { x: n.handleOut.x - ox, y: n.handleOut.y - oy } : null,
+            smooth: n.smooth,
+          })),
+        },
+      ]);
+
+      const newLayer: PathLayer = {
+        id: `pth-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: penAttachTextId ? 'Text Path Curve' : closed ? 'Custom Vector Shape' : 'Bezier Curve',
+        type: 'path',
+        x: Math.round(ox),
+        y: Math.round(oy),
+        width: Math.round(vw),
+        height: Math.round(vh),
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+        locked: false,
+        fill: closed ? activePalette.primary : 'transparent',
+        stroke: closed ? 'none' : activePalette.primary,
+        strokeWidth: closed ? 0 : 3.5,
+        shadow: {
+          enabled: false,
+          color: 'rgba(17, 24, 39, 0.18)',
+          blur: 10,
+          offsetX: 0,
+          offsetY: 6,
+        },
+        pathDataList: [localD],
+        sourceViewBox: { width: vw, height: vh },
+        isOpenPath: !closed,
+      };
+
+      setPenDraft(null);
+      penHandleDragRef.current = null;
+      onCreateLayer?.(newLayer, penAttachTextId);
+    },
+    [activePalette.primary, onCreateLayer, penAttachTextId]
+  );
+
+  const commitPenPathRef = useRef(commitPenPath);
+  commitPenPathRef.current = commitPenPath;
+
+  const startPenPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    cacheSvgRect();
+    const pt = clientToArtboard(e.clientX, e.clientY);
+
+    // Clicking first anchor closes loop when >= 2 points placed
+    if (penDraft && penDraft.nodes.length >= 2) {
+      const first = penDraft.nodes[0];
+      if (Math.hypot(pt.x - first.x, pt.y - first.y) <= Math.max(8, 12 / zoom)) {
+        commitPenPath(penDraft.nodes, true);
+        return;
+      }
+    }
+
+    const nextIdx = penDraft ? penDraft.nodes.length : 0;
+    const newNode: EditableNode = {
+      x: pt.x,
+      y: pt.y,
+      handleIn: null,
+      handleOut: null,
+      smooth: true,
+    };
+
+    setPenDraft((prev) => ({
+      nodes: [...(prev?.nodes ?? []), newNode],
+      cursor: pt,
+    }));
+
+    penHandleDragRef.current = {
+      anchorX: pt.x,
+      anchorY: pt.y,
+      nodeIndex: nextIdx,
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      const active = penHandleDragRef.current;
+      if (!active) return;
+      const curPt = clientToArtboard(ev.clientX, ev.clientY);
+      const dx = curPt.x - active.anchorX;
+      const dy = curPt.y - active.anchorY;
+      if (Math.hypot(dx, dy) < 2) return;
+      setPenDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cursor: curPt,
+          nodes: prev.nodes.map((n, idx) =>
+            idx === active.nodeIndex
+              ? {
+                  ...n,
+                  handleOut: { x: curPt.x, y: curPt.y },
+                  handleIn: { x: active.anchorX - dx, y: active.anchorY - dy },
+                  smooth: true,
+                }
+              : n
+          ),
+        };
+      });
+    };
+
+    const onUp = () => {
+      penHandleDragRef.current = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
+  const startNodeControlDrag = (
+    e: React.PointerEvent,
+    pathLayer: PathLayer,
+    pathIdx: number,
+    subIdx: number,
+    nodeIdx: number,
+    part: 'anchor' | 'handleIn' | 'handleOut'
+  ) => {
+    e.stopPropagation();
+    if (pathLayer.locked) return;
+    cacheSvgRect();
+    setSelectedNode({ pathIdx, subIdx, nodeIdx });
+
+    const clonePaths: EditableSubpath[][] = nodeEditorPaths.map((spList) =>
+      spList.map((sp) => ({
+        closed: sp.closed,
+        nodes: sp.nodes.map((n) => ({
+          ...n,
+          handleIn: n.handleIn ? { ...n.handleIn } : null,
+          handleOut: n.handleOut ? { ...n.handleOut } : null,
+        })),
+      }))
+    );
+
+    nodeDragRef.current = {
+      pathIdx,
+      subIdx,
+      nodeIdx,
+      part,
+      beforeLayer: pathLayer,
+      workingPaths: clonePaths,
+      currentList: [...pathLayer.pathDataList],
+      moved: false,
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      const drag = nodeDragRef.current;
+      if (!drag) return;
+      const artPt = clientToArtboard(ev.clientX, ev.clientY);
+      const [lx, ly] = mapArtboardPointToLocal(artPt.x, artPt.y, drag.beforeLayer);
+      const sx = Math.max(1, drag.beforeLayer.sourceViewBox.width) / Math.max(1, drag.beforeLayer.width);
+      const sy = Math.max(1, drag.beforeLayer.sourceViewBox.height) / Math.max(1, drag.beforeLayer.height);
+      const px = lx * sx;
+      const py = ly * sy;
+
+      const sp = drag.workingPaths[drag.pathIdx]?.[drag.subIdx];
+      const node = sp?.nodes[drag.nodeIdx];
+      if (!node) return;
+
+      drag.moved = true;
+      if (drag.part === 'anchor') {
+        const dx = px - node.x;
+        const dy = py - node.y;
+        node.x = px;
+        node.y = py;
+        if (node.handleIn) {
+          node.handleIn = { x: node.handleIn.x + dx, y: node.handleIn.y + dy };
+        }
+        if (node.handleOut) {
+          node.handleOut = { x: node.handleOut.x + dx, y: node.handleOut.y + dy };
+        }
+      } else if (drag.part === 'handleIn') {
+        node.handleIn = { x: px, y: py };
+        if (node.smooth && !ev.altKey && node.handleOut) {
+          const vx = node.x - px;
+          const vy = node.y - py;
+          const vLen = Math.hypot(vx, vy);
+          const oppLen = Math.hypot(node.handleOut.x - node.x, node.handleOut.y - node.y);
+          if (vLen > 0.01 && oppLen > 0.01) {
+            node.handleOut = {
+              x: node.x + (vx / vLen) * oppLen,
+              y: node.y + (vy / vLen) * oppLen,
+            };
+          }
+        }
+      } else if (drag.part === 'handleOut') {
+        node.handleOut = { x: px, y: py };
+        if (node.smooth && !ev.altKey && node.handleIn) {
+          const vx = node.x - px;
+          const vy = node.y - py;
+          const vLen = Math.hypot(vx, vy);
+          const oppLen = Math.hypot(node.handleIn.x - node.x, node.handleIn.y - node.y);
+          if (vLen > 0.01 && oppLen > 0.01) {
+            node.handleIn = {
+              x: node.x + (vx / vLen) * oppLen,
+              y: node.y + (vy / vLen) * oppLen,
+            };
+          }
+        }
+      }
+
+      const nextList = drag.workingPaths.map((spList) => serializeSubpathsToPathData(spList));
+      drag.currentList = nextList;
+      setNodeEditorPaths(
+        drag.workingPaths.map((spList) =>
+          spList.map((s) => ({
+            closed: s.closed,
+            nodes: s.nodes.map((n) => ({
+              ...n,
+              handleIn: n.handleIn ? { ...n.handleIn } : null,
+              handleOut: n.handleOut ? { ...n.handleOut } : null,
+            })),
+          }))
+        )
+      );
+      latestRef.current.onPreviewLayersChange({
+        [drag.beforeLayer.id]: { ...drag.beforeLayer, pathDataList: nextList },
+      });
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      const drag = nodeDragRef.current;
+      nodeDragRef.current = null;
+      svgRectRef.current = null;
+      if (drag && drag.moved) {
+        const refitted = refitPathLayerAfterNodeEdit(drag.beforeLayer, drag.currentList);
+        latestRef.current.onCommitLayersChange(
+          { [drag.beforeLayer.id]: drag.beforeLayer },
+          { [refitted.id]: refitted }
+        );
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
+  const toggleNodeSmooth = (
+    pathLayer: PathLayer,
+    pathIdx: number,
+    subIdx: number,
+    nodeIdx: number
+  ) => {
+    const nextPaths = nodeEditorPaths.map((spList, pI) =>
+      spList.map((sp, sI) => ({
+        closed: sp.closed,
+        nodes: sp.nodes.map((n, nI) => {
+          if (pI !== pathIdx || sI !== subIdx || nI !== nodeIdx) return n;
+          const nextSmooth = !n.smooth;
+          let handleIn = n.handleIn;
+          let handleOut = n.handleOut;
+          if (nextSmooth) {
+            if (handleIn && handleOut) {
+              const vx = n.x - handleIn.x;
+              const vy = n.y - handleIn.y;
+              const len = Math.hypot(vx, vy) || 1;
+              const outLen = Math.hypot(handleOut.x - n.x, handleOut.y - n.y) || 12;
+              handleOut = { x: n.x + (vx / len) * outLen, y: n.y + (vy / len) * outLen };
+            } else if (!handleIn && !handleOut) {
+              handleIn = { x: n.x - 14, y: n.y };
+              handleOut = { x: n.x + 14, y: n.y };
+            }
+          }
+          return { ...n, smooth: nextSmooth, handleIn, handleOut };
+        }),
+      }))
+    );
+    const nextList = nextPaths.map((spList) => serializeSubpathsToPathData(spList));
+    const refitted = refitPathLayerAfterNodeEdit(pathLayer, nextList);
+    setNodeEditorPaths(nextPaths);
+    onUpdateLayer(refitted);
+  };
+
+  const deleteSelectedNode = useCallback(() => {
+    if (!singlePathLayer || !selectedNode) return;
+    const { pathIdx, subIdx, nodeIdx } = selectedNode;
+    const targetSub = nodeEditorPaths[pathIdx]?.[subIdx];
+    if (!targetSub || targetSub.nodes.length <= 2) return;
+    const nextPaths = nodeEditorPaths.map((spList, pI) =>
+      spList.map((sp, sI) =>
+        pI === pathIdx && sI === subIdx
+          ? { ...sp, nodes: sp.nodes.filter((_, idx) => idx !== nodeIdx) }
+          : sp
+      )
+    );
+    const nextList = nextPaths.map((spList) => serializeSubpathsToPathData(spList));
+    const refitted = refitPathLayerAfterNodeEdit(singlePathLayer, nextList);
+    setNodeEditorPaths(nextPaths);
+    setSelectedNode(null);
+    onUpdateLayer(refitted);
+  }, [nodeEditorPaths, onUpdateLayer, selectedNode, singlePathLayer]);
+
+  const deleteSelectedNodeRef = useRef(deleteSelectedNode);
+  deleteSelectedNodeRef.current = deleteSelectedNode;
+
+  const startPerLetterDrag = (
+    e: React.PointerEvent,
+    layer: TextLayer,
+    kind: 'letter' | 'gap',
+    index: number,
+    gapAngleDeg = 0
+  ) => {
+    e.stopPropagation();
+    if (layer.locked) return;
+    cacheSvgRect();
+    setPerLetterTarget({ kind, index });
+
+    const startVal =
+      kind === 'letter'
+        ? layer.letterTransforms?.[index]?.baselineShift ?? 0
+        : layer.letterKerning?.[index] ?? 0;
+
+    perLetterDragRef.current = {
+      kind,
+      index,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startVal,
+      gapAngleRad: ((gapAngleDeg + (layer.rotation || 0)) * Math.PI) / 180,
+      beforeLayer: layer,
+      currentLayer: layer,
+      moved: false,
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      const drag = perLetterDragRef.current;
+      if (!drag) return;
+      const rect = svgRectRef.current ?? svgRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      const scale = latestRef.current.doc.width / rect.width;
+      const dx = (ev.clientX - drag.startClientX) * scale;
+      const dy = (ev.clientY - drag.startClientY) * scale;
+      if (Math.hypot(dx, dy) > 1.5) drag.moved = true;
+
+      let nextLayer: TextLayer;
+      if (drag.kind === 'letter') {
+        const nextShift = Math.max(-60, Math.min(60, Math.round(drag.startVal - dy)));
+        const existing = drag.beforeLayer.letterTransforms?.[drag.index] ?? {};
+        nextLayer = {
+          ...drag.beforeLayer,
+          letterTransforms: {
+            ...(drag.beforeLayer.letterTransforms ?? {}),
+            [drag.index]: { ...existing, baselineShift: nextShift },
+          },
+        };
+      } else {
+        const proj = dx * Math.cos(drag.gapAngleRad) + dy * Math.sin(drag.gapAngleRad);
+        const nextKern = Math.max(-40, Math.min(80, Math.round(drag.startVal + proj)));
+        nextLayer = {
+          ...drag.beforeLayer,
+          letterKerning: {
+            ...(drag.beforeLayer.letterKerning ?? {}),
+            [drag.index]: nextKern,
+          },
+        };
+      }
+      drag.currentLayer = nextLayer;
+      latestRef.current.onPreviewLayersChange({ [nextLayer.id]: nextLayer });
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      const drag = perLetterDragRef.current;
+      perLetterDragRef.current = null;
+      svgRectRef.current = null;
+      if (drag && drag.moved) {
+        latestRef.current.onCommitLayersChange(
+          { [drag.beforeLayer.id]: drag.beforeLayer },
+          { [drag.currentLayer.id]: drag.currentLayer }
+        );
+      }
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
 
   const cacheSvgRect = () => {
     svgRectRef.current = svgRef.current?.getBoundingClientRect() ?? null;
@@ -1092,6 +1658,19 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               onGroupSelected={onGroupSelected}
               onUngroupSelected={onUngroupSelected}
               onToggleBackgroundLock={onToggleBackgroundLock}
+              penMode={canvasToolMode === 'pen'}
+              onTogglePenTool={onTogglePenTool}
+              onStartPenForText={onStartPenForText}
+              nodeEditMode={canvasToolMode === 'nodes'}
+              onToggleNodeEditMode={() =>
+                onChangeToolMode?.(canvasToolMode === 'nodes' ? 'select' : 'nodes')
+              }
+              perLetterMode={canvasToolMode === 'per-letter'}
+              onTogglePerLetterMode={() =>
+                onChangeToolMode?.(
+                  canvasToolMode === 'per-letter' ? 'select' : 'per-letter'
+                )
+              }
             />
           </div>
 
@@ -1114,13 +1693,34 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           <svg
             ref={svgRef}
             viewBox={`0 0 ${doc.width} ${doc.height}`}
-            className="h-full w-full select-none block touch-none"
+            className={`h-full w-full select-none block touch-none ${
+              canvasToolMode === 'pen' ? 'cursor-crosshair' : ''
+            }`}
             onPointerDown={(e) => {
+              if (canvasToolMode === 'pen') {
+                startPenPointerDown(e);
+                return;
+              }
               if (
                 e.target === e.currentTarget ||
                 (e.target as Element).getAttribute('data-bg') === 'true'
               ) {
+                if (canvasToolMode !== 'select') {
+                  onChangeToolMode?.('select');
+                }
                 startMarqueeSelection(e);
+              }
+            }}
+            onPointerMove={(e) => {
+              if (canvasToolMode === 'pen' && penDraft) {
+                const pt = clientToArtboard(e.clientX, e.clientY);
+                setPenDraft((prev) => (prev ? { ...prev, cursor: pt } : prev));
+              }
+            }}
+            onDoubleClick={(e) => {
+              if (canvasToolMode === 'pen' && penDraft && penDraft.nodes.length >= 2) {
+                e.stopPropagation();
+                commitPenPath(penDraft.nodes, false);
               }
             }}
           >
@@ -1310,19 +1910,35 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             {doc.layers.map((layer) => (
               <g
                 key={layer.id}
-                onPointerDown={(e) => startLayerDrag(e, layer)}
+                onPointerDown={(e) => {
+                  if (canvasToolMode === 'pen') return;
+                  startLayerDrag(e, layer);
+                }}
                 onDoubleClick={(e) => {
+                  if (canvasToolMode === 'pen') return;
                   e.stopPropagation();
-                  if (layer.type === 'text' && !layer.locked) {
+                  if (layer.type === 'text' && !layer.locked && canvasToolMode === 'select') {
                     setEditingTextId(layer.id);
+                  } else if (layer.type === 'path' && !layer.locked) {
+                    onSelectLayers([layer.id]);
+                    onChangeToolMode?.('nodes');
                   }
                 }}
-                style={{ cursor: layer.locked ? 'not-allowed' : 'move', touchAction: 'none' }}
+                style={{
+                  cursor:
+                    canvasToolMode === 'pen'
+                      ? 'crosshair'
+                      : layer.locked
+                        ? 'not-allowed'
+                        : 'move',
+                  touchAction: 'none',
+                }}
               >
                 <CanvasLayerNode
                   layer={layer}
                   docBg={doc.transparentBackground ? 'transparent' : doc.backgroundColor}
                   idPrefix="canvas"
+                  allLayers={doc.layers}
                 />
               </g>
             ))}
@@ -1530,7 +2146,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             )}
 
             {/* Single-layer Selection Bounding Box, 8 Resize Handles & Rotate Handle */}
-            {singleSelected && (
+            {singleSelected && canvasToolMode === 'select' && (
               <g
                 transform={`translate(${singleSelected.x}, ${singleSelected.y})${
                   singleSelected.rotation
@@ -1620,6 +2236,415 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 )}
               </g>
             )}
+
+            {/* ============================================================== */}
+            {/* PEN TOOL LIVE SVG PREVIEW OVERLAY                              */}
+            {/* ============================================================== */}
+            {canvasToolMode === 'pen' && penDraft && penDraft.nodes.length > 0 && (() => {
+              const committedD = serializeSubpathsToPathData([
+                { closed: false, nodes: penDraft.nodes },
+              ]);
+              const lastNode = penDraft.nodes[penDraft.nodes.length - 1];
+              const rubberD = penDraft.cursor
+                ? lastNode.handleOut
+                  ? `M ${lastNode.x.toFixed(1)} ${lastNode.y.toFixed(1)} C ${lastNode.handleOut.x.toFixed(1)} ${lastNode.handleOut.y.toFixed(1)}, ${penDraft.cursor.x.toFixed(1)} ${penDraft.cursor.y.toFixed(1)}, ${penDraft.cursor.x.toFixed(1)} ${penDraft.cursor.y.toFixed(1)}`
+                  : `M ${lastNode.x.toFixed(1)} ${lastNode.y.toFixed(1)} L ${penDraft.cursor.x.toFixed(1)} ${penDraft.cursor.y.toFixed(1)}`
+                : '';
+              const nearStart =
+                penDraft.nodes.length >= 2 &&
+                penDraft.cursor !== null &&
+                Math.hypot(
+                  penDraft.cursor.x - penDraft.nodes[0].x,
+                  penDraft.cursor.y - penDraft.nodes[0].y
+                ) <= Math.max(8, 12 / zoom);
+
+              return (
+                <g pointerEvents="none">
+                  {committedD && (
+                    <path
+                      d={committedD}
+                      fill="none"
+                      stroke="#6366F1"
+                      strokeWidth={2.2 / zoom}
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {rubberD && (
+                    <path
+                      d={rubberD}
+                      fill="none"
+                      stroke="#6366F1"
+                      strokeWidth={1.4 / zoom}
+                      strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+                      opacity={0.75}
+                    />
+                  )}
+                  {penDraft.nodes.map((n, idx) => (
+                    <g key={`pen-pt-${idx}`}>
+                      {n.handleIn && (
+                        <>
+                          <line
+                            x1={n.x}
+                            y1={n.y}
+                            x2={n.handleIn.x}
+                            y2={n.handleIn.y}
+                            stroke="#818CF8"
+                            strokeWidth={1 / zoom}
+                          />
+                          <circle
+                            cx={n.handleIn.x}
+                            cy={n.handleIn.y}
+                            r={3.2 / zoom}
+                            fill="#FFFFFF"
+                            stroke="#6366F1"
+                            strokeWidth={1.3 / zoom}
+                          />
+                        </>
+                      )}
+                      {n.handleOut && (
+                        <>
+                          <line
+                            x1={n.x}
+                            y1={n.y}
+                            x2={n.handleOut.x}
+                            y2={n.handleOut.y}
+                            stroke="#818CF8"
+                            strokeWidth={1 / zoom}
+                          />
+                          <circle
+                            cx={n.handleOut.x}
+                            cy={n.handleOut.y}
+                            r={3.2 / zoom}
+                            fill="#FFFFFF"
+                            stroke="#6366F1"
+                            strokeWidth={1.3 / zoom}
+                          />
+                        </>
+                      )}
+                      <rect
+                        x={n.x - (idx === 0 && nearStart ? 5 : 3.5) / zoom}
+                        y={n.y - (idx === 0 && nearStart ? 5 : 3.5) / zoom}
+                        width={(idx === 0 && nearStart ? 10 : 7) / zoom}
+                        height={(idx === 0 && nearStart ? 10 : 7) / zoom}
+                        rx={1.2 / zoom}
+                        fill={idx === 0 && nearStart ? '#10B981' : '#FFFFFF'}
+                        stroke="#4F46E5"
+                        strokeWidth={1.5 / zoom}
+                      />
+                    </g>
+                  ))}
+                </g>
+              );
+            })()}
+
+            {/* ============================================================== */}
+            {/* PHASE 17 VECTOR NODE EDITOR OVERLAY (SERIFS & BEZIER HANDLES)   */}
+            {/* ============================================================== */}
+            {canvasToolMode === 'nodes' && singlePathLayer && nodeEditorPaths.length > 0 && (() => {
+              const sx = singlePathLayer.width / Math.max(1, singlePathLayer.sourceViewBox.width);
+              const sy = singlePathLayer.height / Math.max(1, singlePathLayer.sourceViewBox.height);
+              const toArt = (lx: number, ly: number) =>
+                mapLocalPointToArtboard(lx * sx, ly * sy, singlePathLayer);
+
+              return (
+                <g>
+                  <rect
+                    x={singlePathLayer.x}
+                    y={singlePathLayer.y}
+                    width={singlePathLayer.width}
+                    height={singlePathLayer.height}
+                    transform={
+                      singlePathLayer.rotation
+                        ? `rotate(${singlePathLayer.rotation}, ${singlePathLayer.x + singlePathLayer.width / 2}, ${singlePathLayer.y + singlePathLayer.height / 2})`
+                        : undefined
+                    }
+                    fill="none"
+                    stroke="#6366F1"
+                    strokeWidth={1 / zoom}
+                    strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+                    opacity={0.45}
+                    pointerEvents="none"
+                  />
+
+                  {nodeEditorPaths.map((spList, pIdx) =>
+                    spList.map((sp, sIdx) => {
+                      const outlinePts = sp.nodes.map((n) => toArt(n.x, n.y));
+                      const wireD = serializeSubpathsToPathData([
+                        {
+                          closed: sp.closed,
+                          nodes: sp.nodes.map((n) => {
+                            const [ax, ay] = toArt(n.x, n.y);
+                            const hi = n.handleIn ? toArt(n.handleIn.x, n.handleIn.y) : null;
+                            const ho = n.handleOut ? toArt(n.handleOut.x, n.handleOut.y) : null;
+                            return {
+                              x: ax,
+                              y: ay,
+                              handleIn: hi ? { x: hi[0], y: hi[1] } : null,
+                              handleOut: ho ? { x: ho[0], y: ho[1] } : null,
+                            };
+                          }),
+                        },
+                      ]);
+                      void outlinePts;
+
+                      return (
+                        <g key={`ne-${pIdx}-${sIdx}`}>
+                          <path
+                            d={wireD}
+                            fill="none"
+                            stroke="#6366F1"
+                            strokeWidth={1.1 / zoom}
+                            opacity={0.75}
+                            pointerEvents="none"
+                          />
+
+                          {sp.nodes.map((node, nIdx) => {
+                            const [ax, ay] = toArt(node.x, node.y);
+                            const isSel =
+                              selectedNode?.pathIdx === pIdx &&
+                              selectedNode?.subIdx === sIdx &&
+                              selectedNode?.nodeIdx === nIdx;
+                            const hi = node.handleIn ? toArt(node.handleIn.x, node.handleIn.y) : null;
+                            const ho = node.handleOut ? toArt(node.handleOut.x, node.handleOut.y) : null;
+                            const anchorSize = (isSel ? 8.5 : 6.5) / zoom;
+
+                            return (
+                              <g key={`node-${pIdx}-${sIdx}-${nIdx}`}>
+                                {hi && (
+                                  <>
+                                    <line
+                                      x1={ax}
+                                      y1={ay}
+                                      x2={hi[0]}
+                                      y2={hi[1]}
+                                      stroke="#818CF8"
+                                      strokeWidth={1 / zoom}
+                                      pointerEvents="none"
+                                    />
+                                    <circle
+                                      cx={hi[0]}
+                                      cy={hi[1]}
+                                      r={7 / zoom}
+                                      fill="transparent"
+                                      style={{ cursor: 'pointer', touchAction: 'none' }}
+                                      onPointerDown={(e) =>
+                                        startNodeControlDrag(
+                                          e,
+                                          singlePathLayer,
+                                          pIdx,
+                                          sIdx,
+                                          nIdx,
+                                          'handleIn'
+                                        )
+                                      }
+                                    />
+                                    <circle
+                                      cx={hi[0]}
+                                      cy={hi[1]}
+                                      r={3.2 / zoom}
+                                      fill="#FFFFFF"
+                                      stroke="#4F46E5"
+                                      strokeWidth={1.3 / zoom}
+                                      pointerEvents="none"
+                                    />
+                                  </>
+                                )}
+                                {ho && (
+                                  <>
+                                    <line
+                                      x1={ax}
+                                      y1={ay}
+                                      x2={ho[0]}
+                                      y2={ho[1]}
+                                      stroke="#818CF8"
+                                      strokeWidth={1 / zoom}
+                                      pointerEvents="none"
+                                    />
+                                    <circle
+                                      cx={ho[0]}
+                                      cy={ho[1]}
+                                      r={7 / zoom}
+                                      fill="transparent"
+                                      style={{ cursor: 'pointer', touchAction: 'none' }}
+                                      onPointerDown={(e) =>
+                                        startNodeControlDrag(
+                                          e,
+                                          singlePathLayer,
+                                          pIdx,
+                                          sIdx,
+                                          nIdx,
+                                          'handleOut'
+                                        )
+                                      }
+                                    />
+                                    <circle
+                                      cx={ho[0]}
+                                      cy={ho[1]}
+                                      r={3.2 / zoom}
+                                      fill="#FFFFFF"
+                                      stroke="#4F46E5"
+                                      strokeWidth={1.3 / zoom}
+                                      pointerEvents="none"
+                                    />
+                                  </>
+                                )}
+
+                                <rect
+                                  x={ax - Math.max(anchorSize, 13 / zoom) / 2}
+                                  y={ay - Math.max(anchorSize, 13 / zoom) / 2}
+                                  width={Math.max(anchorSize, 13 / zoom)}
+                                  height={Math.max(anchorSize, 13 / zoom)}
+                                  fill="transparent"
+                                  style={{ cursor: 'move', touchAction: 'none' }}
+                                  onPointerDown={(e) =>
+                                    startNodeControlDrag(
+                                      e,
+                                      singlePathLayer,
+                                      pIdx,
+                                      sIdx,
+                                      nIdx,
+                                      'anchor'
+                                    )
+                                  }
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleNodeSmooth(singlePathLayer, pIdx, sIdx, nIdx);
+                                  }}
+                                />
+                                <rect
+                                  x={ax - anchorSize / 2}
+                                  y={ay - anchorSize / 2}
+                                  width={anchorSize}
+                                  height={anchorSize}
+                                  rx={node.smooth ? anchorSize / 2 : 1 / zoom}
+                                  fill={isSel ? '#4F46E5' : '#FFFFFF'}
+                                  stroke={isSel ? '#FFFFFF' : '#4F46E5'}
+                                  strokeWidth={1.4 / zoom}
+                                  pointerEvents="none"
+                                />
+                              </g>
+                            );
+                          })}
+                        </g>
+                      );
+                    })
+                  )}
+                </g>
+              );
+            })()}
+
+            {/* ============================================================== */}
+            {/* PER-LETTER KERNING & TRANSFORM INTERACTIVE OVERLAY             */}
+            {/* ============================================================== */}
+            {canvasToolMode === 'per-letter' &&
+              singleTextLayer &&
+              perLetterLayout && (() => {
+                const layer = singleTextLayer;
+                const layerTransform = [
+                  `translate(${layer.x}, ${layer.y})`,
+                  layer.rotation
+                    ? `rotate(${layer.rotation}, ${layer.width / 2}, ${layer.height / 2})`
+                    : '',
+                  layer.flipX ? `translate(${layer.width}, 0) scale(-1, 1)` : '',
+                  layer.flipY ? `translate(0, ${layer.height}) scale(1, -1)` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+
+                return (
+                  <g transform={layerTransform}>
+                    {perLetterLayout.pathD && (
+                      <path
+                        d={perLetterLayout.pathD}
+                        fill="none"
+                        stroke="#6366F1"
+                        strokeWidth={1 / zoom}
+                        strokeDasharray={`${4 / zoom} ${3 / zoom}`}
+                        opacity={0.5}
+                        pointerEvents="none"
+                      />
+                    )}
+
+                    {/* Clickable/draggable letter bounding boxes */}
+                    {perLetterLayout.glyphs.map((g) => {
+                      if (!g.char.trim()) return null;
+                      const isSel =
+                        perLetterTarget?.kind === 'letter' &&
+                        perLetterTarget.index === g.index;
+                      const bw = Math.max(10, g.adv);
+                      const bh = Math.max(14, g.fontSize * g.scale * 0.9);
+                      return (
+                        <g
+                          key={`pl-ch-${g.index}`}
+                          transform={`translate(${g.x}, ${g.y}) rotate(${g.angleDeg})`}
+                          style={{ cursor: 'ns-resize', touchAction: 'none' }}
+                          onPointerDown={(e) =>
+                            startPerLetterDrag(e, layer, 'letter', g.index, g.angleDeg)
+                          }
+                        >
+                          <rect
+                            x={-bw / 2}
+                            y={-bh * 0.78}
+                            width={bw}
+                            height={bh}
+                            rx={3 / zoom}
+                            fill={
+                              isSel ? 'rgba(99, 102, 241, 0.16)' : 'rgba(99, 102, 241, 0.03)'
+                            }
+                            stroke={isSel ? '#4F46E5' : '#818CF8'}
+                            strokeWidth={(isSel ? 1.8 : 0.9) / zoom}
+                            strokeDasharray={isSel ? undefined : `${2.5 / zoom} ${2 / zoom}`}
+                          />
+                        </g>
+                      );
+                    })}
+
+                    {/* Clickable/draggable kerning gaps between characters */}
+                    {perLetterLayout.glyphs.map((g) => {
+                      if (!g.hasGapAfter) return null;
+                      const isGapSel =
+                        perLetterTarget?.kind === 'gap' &&
+                        perLetterTarget.index === g.index;
+                      const rGap = (isGapSel ? 6 : 4.5) / zoom;
+                      return (
+                        <g
+                          key={`pl-gap-${g.index}`}
+                          transform={`translate(${g.gapX}, ${g.gapY}) rotate(${g.gapAngleDeg})`}
+                          style={{ cursor: 'ew-resize', touchAction: 'none' }}
+                          onPointerDown={(e) =>
+                            startPerLetterDrag(e, layer, 'gap', g.index, g.gapAngleDeg)
+                          }
+                        >
+                          <line
+                            x1={0}
+                            y1={-g.fontSize * 0.72}
+                            x2={0}
+                            y2={4}
+                            stroke={isGapSel ? '#D97706' : '#6366F1'}
+                            strokeWidth={(isGapSel ? 1.6 : 0.9) / zoom}
+                            strokeDasharray={`${2.5 / zoom} ${2 / zoom}`}
+                            opacity={isGapSel ? 0.95 : 0.55}
+                            pointerEvents="none"
+                          />
+                          <circle
+                            cx={0}
+                            cy={4}
+                            r={Math.max(rGap, 9 / zoom)}
+                            fill="transparent"
+                          />
+                          <polygon
+                            points={`0,${4 - rGap} ${rGap},4 0,${4 + rGap} ${-rGap},4`}
+                            fill={isGapSel ? '#F59E0B' : '#FFFFFF'}
+                            stroke={isGapSel ? '#B45309' : '#6366F1'}
+                            strokeWidth={1.3 / zoom}
+                            pointerEvents="none"
+                          />
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              })()}
           </svg>
 
           {/* Double-click Inline Text Edit Overlay */}
@@ -1653,6 +2678,272 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             </div>
           )}
         </div>
+
+        {/* ============================================================== */}
+        {/* FLOATING TOOL HUDs (PEN TOOL / NODE EDITOR / PER-LETTER)       */}
+        {/* ============================================================== */}
+        {canvasToolMode === 'pen' && (
+          <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-300">
+              <PenTool className="h-3.5 w-3.5" />
+              {penAttachTextId
+                ? 'Pen Tool (Click & drag to draw Bezier curve for text)'
+                : 'Pen Tool (Click points, drag for Bezier curves)'}
+            </span>
+            <span className="font-mono-num text-[11px] text-slate-500 dark:text-slate-400">
+              {penDraft?.nodes.length ?? 0} pts
+            </span>
+            {penDraft && penDraft.nodes.length >= 2 && (
+              <button
+                type="button"
+                onClick={() => commitPenPath(penDraft.nodes, false)}
+                className="rounded-full bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 cursor-pointer"
+              >
+                Finish Curve
+              </button>
+            )}
+            {penDraft && penDraft.nodes.length >= 3 && (
+              <button
+                type="button"
+                onClick={() => commitPenPath(penDraft.nodes, true)}
+                className="rounded-full border border-indigo-300 dark:border-indigo-500/40 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 cursor-pointer"
+              >
+                Close Shape
+              </button>
+            )}
+            {penDraft && penDraft.nodes.length > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setPenDraft((prev) =>
+                    prev && prev.nodes.length > 1
+                      ? { ...prev, nodes: prev.nodes.slice(0, -1) }
+                      : null
+                  )
+                }
+                className="rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] px-2.5 py-1 text-[11px] font-medium hover:bg-slate-100 dark:hover:bg-[#252A38] cursor-pointer"
+              >
+                Undo Pt
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setPenDraft(null);
+                onChangeToolMode?.('select');
+              }}
+              className="rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#252A38] cursor-pointer"
+            >
+              Cancel (Esc)
+            </button>
+          </div>
+        )}
+
+        {canvasToolMode === 'nodes' && singlePathLayer && (
+          <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-300">
+              <Spline className="h-3.5 w-3.5" />
+              Node Editor · Drag anchors &amp; handles to sculpt letter serifs
+            </span>
+            {selectedNode && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    toggleNodeSmooth(
+                      singlePathLayer,
+                      selectedNode.pathIdx,
+                      selectedNode.subIdx,
+                      selectedNode.nodeIdx
+                    )
+                  }
+                  className="rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] px-2.5 py-1 text-[11px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252A38] cursor-pointer"
+                >
+                  Smooth / Corner
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteSelectedNode}
+                  className="rounded-full border border-red-200 dark:border-red-900/50 px-2.5 py-1 text-[11px] font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer"
+                >
+                  Delete Node
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => onChangeToolMode?.('select')}
+              className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 cursor-pointer"
+            >
+              Done (Esc)
+            </button>
+          </div>
+        )}
+
+        {canvasToolMode === 'per-letter' && singleTextLayer && perLetterTarget && (() => {
+          const rawDisplay = singleTextLayer.uppercase
+            ? singleTextLayer.text.toUpperCase()
+            : singleTextLayer.text;
+          const tMap = singleTextLayer.letterTransforms ?? {};
+          const kMap = singleTextLayer.letterKerning ?? {};
+
+          if (perLetterTarget.kind === 'letter') {
+            const idx = perLetterTarget.index;
+            const ch = Array.from(rawDisplay)[idx] ?? '?';
+            const tr = tMap[idx] ?? {};
+            const scaleVal = tr.scale ?? 1;
+            const rotVal = tr.rotation ?? 0;
+            const shiftVal = tr.baselineShift ?? 0;
+
+            const patchLetter = (patch: {
+              scale?: number;
+              rotation?: number;
+              baselineShift?: number;
+            }) => {
+              onUpdateLayer({
+                ...singleTextLayer,
+                letterTransforms: {
+                  ...tMap,
+                  [idx]: { ...tr, ...patch },
+                },
+              });
+            };
+
+            return (
+              <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-300">
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Letter &ldquo;{ch}&rdquo; (#{idx + 1})
+                </span>
+
+                <label className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">Scale</span>
+                  <input
+                    type="range"
+                    min={0.4}
+                    max={2.4}
+                    step={0.05}
+                    value={scaleVal}
+                    onChange={(e) => patchLetter({ scale: Number(e.target.value) })}
+                    className="w-20 accent-indigo-600 cursor-pointer"
+                  />
+                  <span className="font-mono-num w-9 text-[11px] font-semibold">
+                    {scaleVal.toFixed(2)}x
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">Rotate</span>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={rotVal}
+                    onChange={(e) => patchLetter({ rotation: Number(e.target.value) })}
+                    className="w-20 accent-indigo-600 cursor-pointer"
+                  />
+                  <span className="font-mono-num w-9 text-[11px] font-semibold">
+                    {rotVal}°
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">Baseline</span>
+                  <input
+                    type="range"
+                    min={-60}
+                    max={60}
+                    step={1}
+                    value={shiftVal}
+                    onChange={(e) => patchLetter({ baselineShift: Number(e.target.value) })}
+                    className="w-20 accent-indigo-600 cursor-pointer"
+                  />
+                  <span className="font-mono-num w-9 text-[11px] font-semibold">
+                    {shiftVal}px
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextT = { ...tMap };
+                    delete nextT[idx];
+                    onUpdateLayer({ ...singleTextLayer, letterTransforms: nextT });
+                  }}
+                  className="rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] px-2.5 py-1 text-[11px] font-medium hover:bg-slate-100 dark:hover:bg-[#252A38] cursor-pointer"
+                >
+                  Reset Letter
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onChangeToolMode?.('select')}
+                  className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 cursor-pointer"
+                >
+                  Done (Esc)
+                </button>
+              </div>
+            );
+          }
+
+          // Gap / Pair Kerning selected
+          const gIdx = perLetterTarget.index;
+          const charsArr = Array.from(rawDisplay);
+          const leftCh = charsArr[gIdx] ?? '';
+          const rightCh = charsArr[gIdx + 1] ?? '';
+          const kernVal = kMap[gIdx] ?? 0;
+
+          return (
+            <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 dark:border-amber-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Pair Kerning &ldquo;{leftCh} ↔ {rightCh}&rdquo;
+              </span>
+
+              <label className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">Kern</span>
+                <input
+                  type="range"
+                  min={-40}
+                  max={80}
+                  step={1}
+                  value={kernVal}
+                  onChange={(e) =>
+                    onUpdateLayer({
+                      ...singleTextLayer,
+                      letterKerning: { ...kMap, [gIdx]: Number(e.target.value) },
+                    })
+                  }
+                  className="w-28 accent-amber-500 cursor-pointer"
+                />
+                <span className="font-mono-num w-10 text-[11px] font-semibold">
+                  {kernVal}px
+                </span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const nextK = { ...kMap };
+                  delete nextK[gIdx];
+                  onUpdateLayer({ ...singleTextLayer, letterKerning: nextK });
+                }}
+                className="rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] px-2.5 py-1 text-[11px] font-medium hover:bg-slate-100 dark:hover:bg-[#252A38] cursor-pointer"
+              >
+                Reset Pair
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onChangeToolMode?.('select')}
+                className="rounded-full bg-indigo-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 cursor-pointer"
+              >
+                Done (Esc)
+              </button>
+            </div>
+          );
+        })()}
         </div>
         </div>
 

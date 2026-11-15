@@ -259,6 +259,29 @@ export interface TextWarpConfig {
   perspective?: number; // -30..30 deg vertical tilt / perspective skew
 }
 
+export interface TextPathAttachment {
+  mode: 'preset-circle' | 'preset-wave' | 'layer';
+  /** Target canvas layer ID when mode === 'layer' (shape, ring, or Pen Bezier path) */
+  targetLayerId?: string;
+  /** Cached artboard-space SVG path d for export and detached fallback */
+  customPathD?: string;
+  /** 0..100 percentage position along the path */
+  startOffset: number;
+  /** Flip text onto the opposite side / direction of the path */
+  flipSide: boolean;
+  /** -60..60 px perpendicular baseline shift from the curve */
+  baselineShift: number;
+}
+
+export interface PerLetterTransform {
+  /** Independent glyph scale multiplier (default 1) */
+  scale?: number;
+  /** Independent glyph rotation in degrees */
+  rotation?: number;
+  /** Independent vertical baseline shift in px */
+  baselineShift?: number;
+}
+
 export interface TextLayer extends LayerBase {
   type: 'text';
   text: string;
@@ -275,6 +298,12 @@ export interface TextLayer extends LayerBase {
   curveRadius: number;
   textEffect?: TextEffectConfig;
   textWarp?: TextWarpConfig;
+  /** Phase 20: Custom path attachment (circle, wave, or Pen-tool Bezier path) */
+  textPath?: TextPathAttachment;
+  /** Phase 20: Per-gap kerning overrides in px indexed by left character index */
+  letterKerning?: Record<number, number>;
+  /** Phase 20: Per-letter independent scale/rotation/baseline shifts indexed by character index */
+  letterTransforms?: Record<number, PerLetterTransform>;
 }
 
 export interface PathLayer extends LayerBase {
@@ -284,6 +313,8 @@ export interface PathLayer extends LayerBase {
   sourceViewBox: { width: number; height: number };
   fillRule?: 'nonzero' | 'evenodd';
   sourceText?: string;
+  /** True for open Pen-tool Bezier curves rendered with stroke only */
+  isOpenPath?: boolean;
 }
 
 export interface CustomSvgPart {

@@ -8,7 +8,21 @@ import { createServer as createViteServer } from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 3000);
+function resolvePort(): number {
+  const portFlagIndex = process.argv.findIndex((arg) => arg === '--port' || arg === '-p');
+  if (portFlagIndex !== -1 && process.argv[portFlagIndex + 1]) {
+    const parsed = Number(process.argv[portFlagIndex + 1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  const inlinePortArg = process.argv.find((arg) => arg.startsWith('--port='));
+  if (inlinePortArg) {
+    const parsed = Number(inlinePortArg.split('=')[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 3000;
+}
+
+const PORT = resolvePort();
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 const STYLE_DIRECTIVES: Record<string, string> = {
