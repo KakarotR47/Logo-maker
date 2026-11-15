@@ -7,6 +7,7 @@ import {
 import {
   BrandBrief,
   ColorPalette,
+  CustomSvgLayer,
   DividerLayer,
   FontOption,
   IconLayer,
@@ -186,6 +187,7 @@ export interface ArchetypeBuildOptions {
   secondaryFontOverride?: string;
   containerShapeOverride?: ShapeLayer['shapeKind'];
   gradientTitle?: boolean;
+  paletteOverride?: ColorPalette;
 }
 
 export function buildDocumentForArchetype(
@@ -197,7 +199,7 @@ export function buildDocumentForArchetype(
 ): LogoDocument {
   const effectiveStyleOverride = options?.styleOverride ?? styleOverride;
   const style = effectiveStyleOverride ?? brief.style;
-  const palette = resolvePalette(brief.paletteId);
+  const palette = options?.paletteOverride ?? resolvePalette(brief.paletteId);
   const matchedIcons = pickMatchingIcons(brief);
   const iconId = options?.iconOverride ?? iconOverride ?? matchedIcons[0] ?? 'leaf-circuit';
   const { primary, secondary } = resolveFontsForStyle(
@@ -1146,3 +1148,159 @@ function centerLayersInArtboard(
     return scaled;
   });
 }
+
+export interface RemixSpecInput {
+  title: string;
+  archetype: LayoutArchetype;
+  style: LogoStylePreset;
+  primaryFontId: string;
+  secondaryFontId: string;
+  palette: ColorPalette;
+  gradientTitle?: boolean;
+  containerShapeOverride?: ShapeLayer['shapeKind'];
+}
+
+export function extractBrandContextFromDoc(
+  doc: LogoDocument,
+  brief: BrandBrief
+): {
+  brandName: string;
+  tagline: string;
+  activeIconId?: string;
+  customSvg?: CustomSvgLayer;
+  symbolSummary: string;
+} {
+  const textLayers = doc.layers
+    .filter((l): l is TextLayer => l.type === 'text' && l.visible)
+    .sort((a, b) => b.fontSize - a.fontSize);
+
+  const brandName = (textLayers[0]?.text || brief.businessName || 'Studio Brand').trim();
+  const tagline = (textLayers[1]?.text || brief.tagline || '').trim();
+  const iconLayer = doc.layers.find((l): l is IconLayer => l.type === 'icon' && l.visible);
+  const customSvg = doc.layers.find(
+    (l): l is CustomSvgLayer => l.type === 'custom-svg' && l.visible
+  );
+
+  const iconDef = iconLayer
+    ? VECTOR_ICONS.find((v) => v.id === iconLayer.iconId)
+    : undefined;
+
+  const symbolSummary = customSvg
+    ? customSvg.name
+    : iconDef
+      ? `${iconDef.name} (${iconDef.category})`
+      : brief.symbolIdea || 'minimalist geometric emblem';
+
+  return {
+    brandName,
+    tagline,
+    activeIconId: iconLayer?.iconId,
+    customSvg,
+    symbolSummary,
+  };
+}
+
+/**
+ * Generates a fresh layout & color harmony remix document while keeping the user's
+ * live brand name, tagline, and active symbol/custom-SVG mark intact.
+ */
+export function buildRemixedLogoDocument(
+  sourceDoc: LogoDocument,
+  brief: BrandBrief,
+  spec: RemixSpecInput
+): LogoDocument {
+  const ctx = extractBrandContextFromDoc(sourceDoc, brief);
+  const effectiveBrief: BrandBrief = {
+    ...brief,
+    businessName: ctx.brandName,
+    tagline: ctx.tagline,
+    style: spec.style,
+    primaryFontId: spec.primaryFontId,
+    secondaryFontId: spec.secondaryFontId,
+  };
+
+  let nextDoc = buildDocumentForArchetype(
+    effectiveBrief,
+    spec.archetype,
+    spec.style,
+    ctx.activeIconId,
+    {
+      primaryFontOverride: spec.primaryFontId,
+      secondaryFontOverride: spec.secondaryFontId,
+      paletteOverride: spec.palette,
+      gradientTitle: spec.gradientTitle,
+      containerShapeOverride: spec.containerShapeOverride,
+    }
+  );
+
+  // If the user has an AI-traced or uploaded CustomSvgLayer, carry that exact vector mark into the new layout
+  if (ctx.customSvg) {
+    const sourceSvg = ctx.customSvg;
+    const hasIconSlot = nextDoc.layers.some((l) => l.type === 'icon');
+    const swappedLayers = hasIconSlot
+      ? nextDoc.layers.map((l): LogoLayer => {
+          if (l.type !== 'icon') return l;
+          const customCopy: CustomSvgLayer = {
+            id: nextLayerId('rmxsvg'),
+            name: sourceSvg.name,
+            type: 'custom-svg',
+            x: l.x,
+            y: l.y,
+            width: l.width,
+            height: l.height,
+            rotation: l.rotation,
+            opacity: l.opacity,
+            visible: true,
+            locked: false,
+            fill: l.fill,
+            stroke: l.stroke,
+            strokeWidth: l.strokeWidth,
+            shadow: { ...l.shadow },
+            paths: sourceSvg.paths.map((p, idx) => ({
+              ...p,
+              fill: sourceSvg.preserveOriginalColors
+                ? p.fill === 'none'
+                  ? 'none'
+                  : idx === 0
+                    ? spec.palette.primary
+                    : idx === 1
+                      ? spec.palette.accent
+                      : p.fill
+                : l.fill,
+            })),
+            viewBox: sourceSvg.viewBox,
+            preserveOriginalColors: sourceSvg.preserveOriginalColors,
+          };
+          return customCopy;
+        })
+      : nextDoc.layers;
+
+    nextDoc = { ...nextDoc, layers: swappedLayers };
+  }
+
+  // Scale cleanly if source artboard dimensions differ from 800x600
+  const scaleX = sourceDoc.width / nextDoc.width;
+  const scaleY = sourceDoc.height / nextDoc.height;
+  const uniformScale = Math.min(scaleX, scaleY);
+  if (sourceDoc.width !== nextDoc.width || sourceDoc.height !== nextDoc.height) {
+    nextDoc = {
+      ...nextDoc,
+      width: sourceDoc.width,
+      height: sourceDoc.height,
+      layers: nextDoc.layers.map((l) => ({
+        ...l,
+        x: Math.round(l.x * scaleX),
+        y: Math.round(l.y * scaleY),
+        width: Math.round(l.width * uniformScale),
+        height: Math.round(l.height * uniformScale),
+        ...(l.type === 'text' ? { fontSize: Math.round(l.fontSize * uniformScale) } : {}),
+      })),
+    };
+  }
+
+  return {
+    ...nextDoc,
+    title: `${ctx.brandName} · ${spec.title}`,
+  };
+}
+

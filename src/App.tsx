@@ -54,6 +54,7 @@ import {
   TextLayer,
 } from './types/logo';
 import { PlanTier } from './types/monetization';
+import { AiBrandBrainstormItem } from './utils/aiApi';
 import {
   generateFourLogoVariations,
   LogoVariationEntry,
@@ -198,8 +199,15 @@ export default function App() {
     }
   }, [studioTheme]);
 
+  const [customPalette, setCustomPalette] = useState<ColorPalette | null>(null);
   const activeDoc = history.present;
-  const activePalette = useMemo(() => resolvePalette(brief.paletteId), [brief.paletteId]);
+  const activePalette = useMemo(
+    () =>
+      customPalette && customPalette.id === brief.paletteId
+        ? customPalette
+        : resolvePalette(brief.paletteId),
+    [brief.paletteId, customPalette]
+  );
   const selectedLayers = useMemo(
     () => activeDoc.layers.filter((l) => selectedLayerIds.includes(l.id)),
     [activeDoc.layers, selectedLayerIds]
@@ -800,15 +808,16 @@ export default function App() {
     }
   };
 
-  const handleApplyPalette = (pal: ColorPalette) => {
+  const handleApplyPalette = (pal: ColorPalette, targetDoc: LogoDocument = activeDoc) => {
+    setCustomPalette(pal);
     setBrief((b) => ({ ...b, paletteId: pal.id }));
     commitDocument({
-      ...activeDoc,
+      ...targetDoc,
       backgroundColor: pal.background,
-      layers: activeDoc.layers.map((l, idx) => {
+      layers: targetDoc.layers.map((l, idx) => {
         if (l.type === 'icon') {
-          const onDarkShape = activeDoc.layers.some(
-            (s) => s.type === 'shape' && s.fill !== 'transparent' && s.fill !== activeDoc.backgroundColor
+          const onDarkShape = targetDoc.layers.some(
+            (s) => s.type === 'shape' && s.fill !== 'transparent' && s.fill !== targetDoc.backgroundColor
           );
           return {
             ...l,
@@ -837,6 +846,49 @@ export default function App() {
         return { ...l, fill: pal.primary };
       }),
     });
+  };
+
+  const handleApplyRemixedDocument = (remixedDoc: LogoDocument, pal: ColorPalette) => {
+    setCustomPalette(pal);
+    setBrief((b) => ({ ...b, paletteId: pal.id }));
+    commitDocument(remixedDoc);
+    setSelectedLayerIds([]);
+    showEditorNotice(`Applied remix: ${remixedDoc.title}`);
+  };
+
+  const handleApplyBrandBrainstorm = (item: AiBrandBrainstormItem) => {
+    setCustomPalette(item.palette);
+    setBrief((b) => ({
+      ...b,
+      businessName: item.brandName,
+      tagline: item.tagline,
+      symbolIdea: item.symbolPrompt,
+      style: item.style,
+      paletteId: item.palette.id,
+    }));
+
+    const textLayersSorted = activeDoc.layers
+      .filter((l): l is TextLayer => l.type === 'text')
+      .sort((a, b) => b.fontSize - a.fontSize);
+    const primaryTextId = textLayersSorted[0]?.id;
+    const secondaryTextId = textLayersSorted[1]?.id;
+
+    const updatedDoc: LogoDocument = {
+      ...activeDoc,
+      title: item.brandName,
+      layers: activeDoc.layers.map((l) => {
+        if (l.type === 'text' && l.id === primaryTextId) {
+          return { ...l, text: item.brandName };
+        }
+        if (l.type === 'text' && l.id === secondaryTextId) {
+          return { ...l, text: item.tagline };
+        }
+        return l;
+      }),
+    };
+
+    handleApplyPalette(item.palette, updatedDoc);
+    showEditorNotice(`Applied "${item.brandName}" + ${item.psychologyMood} palette.`);
   };
 
   const handleMagicRecolor = () => {
@@ -1763,6 +1815,7 @@ export default function App() {
         <main className="flex flex-1 flex-col lg:flex-row min-h-0 overflow-hidden">
           <EditorLeftSidebar
             doc={activeDoc}
+            brief={brief}
             brandName={brief.businessName}
             activePalette={activePalette}
             activeStyle={brief.style}
@@ -1774,6 +1827,8 @@ export default function App() {
             onAddDivider={handleAddDivider}
             onUploadCustomSvg={handleUploadCustomSvg}
             onInsertTracedSymbol={handleInsertTracedSymbol}
+            onApplyRemixedDocument={handleApplyRemixedDocument}
+            onApplyBrandBrainstorm={handleApplyBrandBrainstorm}
             onAddText={handleAddText}
             onUpdateLayer={handleUpdateLayer}
             onInsertMonogram={handleInsertMonogram}

@@ -33,6 +33,7 @@ import {
   VECTOR_ICONS,
 } from '../data/logoLibrary';
 import {
+  BrandBrief,
   ColorPalette,
   DividerKind,
   FontOption,
@@ -44,6 +45,7 @@ import {
   ShapeKind,
   TextLayer,
 } from '../types/logo';
+import { AiBrandBrainstormItem } from '../utils/aiApi';
 import { batchLoadGoogleFonts, ensureFontOptionLoaded } from '../utils/googleFonts';
 import {
   ICONIFY_COLLECTIONS,
@@ -84,6 +86,7 @@ export interface UploadedSvgEntry {
 
 interface EditorLeftSidebarProps {
   doc: LogoDocument;
+  brief: BrandBrief;
   brandName: string;
   activePalette: ColorPalette;
   activeStyle: LogoStylePreset;
@@ -95,6 +98,8 @@ interface EditorLeftSidebarProps {
   onAddDivider: (kind: DividerKind) => void;
   onUploadCustomSvg: (svgText: string, fileName: string, recordUpload?: boolean) => void;
   onInsertTracedSymbol: (payload: TracedSymbolPayload) => void;
+  onApplyRemixedDocument: (doc: LogoDocument, palette: ColorPalette) => void;
+  onApplyBrandBrainstorm: (item: AiBrandBrainstormItem) => void;
   onAddText: (preset: 'heading' | 'tagline' | 'curved') => void;
   onUpdateLayer: (updated: LogoLayer) => void;
   onInsertMonogram: (layers: LogoLayer[], mode: 'add' | 'replace') => void;
@@ -132,6 +137,7 @@ const RAIL_ITEMS: Array<{
 
 export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   doc,
+  brief,
   brandName,
   activePalette,
   activeStyle,
@@ -143,6 +149,8 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   onAddDivider,
   onUploadCustomSvg,
   onInsertTracedSymbol,
+  onApplyRemixedDocument,
+  onApplyBrandBrainstorm,
   onAddText,
   onUpdateLayer,
   onInsertMonogram,
@@ -1189,8 +1197,12 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             {activeTab === 'ai' && (
               <AiMagicPanel
                 variant="sidebar"
+                doc={doc}
+                brief={brief}
                 activePalette={activePalette}
                 onInsertTracedSymbol={onInsertTracedSymbol}
+                onApplyRemixedDocument={onApplyRemixedDocument}
+                onApplyBrandBrainstorm={onApplyBrandBrainstorm}
               />
             )}
 

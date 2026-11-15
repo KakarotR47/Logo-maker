@@ -19,6 +19,40 @@ export interface BuildReleaseNote {
 
 export const STUDIO_UPDATE_LOG: BuildReleaseNote[] = [
   {
+    id: 'build-18',
+    buildLabel: 'Build 18',
+    title: 'Phase 14: Pro AI Magic Studio',
+    dateLabel: 'November 2026',
+    summary:
+      'Expanded the AI Magic drawer into a 4-tool studio connected to Gemini backend endpoints and client vector processing: Multi-Color Image-to-Clean-SVG Vectorizer, 6 Logo Remixes, Brand Name & Slogan Generator, and Magic Eraser Background Remover.',
+    changes: [
+      {
+        kind: 'added',
+        area: 'Image-to-Clean-SVG',
+        title: 'Multi-Color Vectorizer & Gemini Sketch Cleanup (/api/ai/clean-sketch)',
+        details:
+          'Upload rough sketches, PNGs, or JPGs to strip backgrounds automatically and trace up to 6 quantized flat colors into individually editable SVG paths, with 1-click Gemini AI sketch cleanup.',
+        filesEdited: ['server.ts', 'src/utils/vectorTrace.ts', 'src/components/AiMagicPanel.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'AI Logo Remix',
+        title: 'Generate 6 Remixes Preserving Brand & Mark (/api/ai/remix-concepts)',
+        details:
+          'Generates 6 live layout, font pairing, and color harmony remixes from the active canvas logo while preserving your brand name, tagline, and active symbol or custom SVG mark.',
+        filesEdited: ['server.ts', 'src/utils/aiApi.ts', 'src/utils/logoGenerator.ts'],
+      },
+      {
+        kind: 'added',
+        area: 'Brand AI & Magic Eraser',
+        title: 'Brand Name/Slogan/Psychology Generator & 1-Click Background Remover',
+        details:
+          'Added 1-click brand name, tagline, and color psychology generation (/api/ai/brand-brainstorm) plus a Magic Eraser with border flood-fill alpha removal, Gemini complex BG isolation, transparent PNG download, and SVG conversion.',
+        filesEdited: ['server.ts', 'src/components/AiMagicPanel.tsx', 'src/components/EditorLeftSidebar.tsx', 'src/App.tsx'],
+      },
+    ],
+  },
+  {
     id: 'build-17',
     buildLabel: 'Build 17',
     title: 'Phase 11: Flagship SaaS Studio UI/UX Overhaul',
