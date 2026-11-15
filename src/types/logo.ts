@@ -219,6 +219,34 @@ export interface LayerClipMask {
   customViewBox?: { width: number; height: number };
 }
 
+export type BrandColorTokenId = 'primary' | 'secondary' | 'accent' | 'text' | 'background';
+export type BrandFontTokenId = 'display' | 'tagline';
+
+export interface BrandColorToken {
+  id: BrandColorTokenId;
+  label: string;
+  hex: string;
+}
+
+export interface BrandFontToken {
+  id: BrandFontTokenId;
+  label: string;
+  fontId: string;
+  fontFamily: string;
+}
+
+export interface BrandTokens {
+  colors: Record<BrandColorTokenId, BrandColorToken>;
+  fonts: Record<BrandFontTokenId, BrandFontToken>;
+}
+
+export type ArtboardPresetKind =
+  | 'primary-horizontal'
+  | 'stacked-badge'
+  | 'app-icon'
+  | 'social-banner'
+  | 'custom';
+
 export interface LayerBase {
   id: string;
   name: string;
@@ -239,10 +267,14 @@ export interface LayerBase {
   locked: boolean;
   groupId?: string;
   fill: string;
+  /** Global Brand Color Token linked to fill */
+  fillToken?: BrandColorTokenId;
   fillGradient?: LayerGradient;
   fillPattern?: LayerPatternFill;
   clipMask?: LayerClipMask;
   stroke: string;
+  /** Global Brand Color Token linked to stroke */
+  strokeToken?: BrandColorTokenId;
   strokeWidth: number;
   shadow: LayerShadow;
 }
@@ -251,7 +283,9 @@ export interface IconLayer extends LayerBase {
   type: 'icon';
   iconId: string;
   secondaryFill: string;
+  secondaryFillToken?: BrandColorTokenId;
   accentFill: string;
+  accentFillToken?: BrandColorTokenId;
   /** Optional per-path color overrides indexed by path order */
   partColors?: string[];
 }
@@ -328,6 +362,8 @@ export interface TextLayer extends LayerBase {
   text: string;
   fontFamily: string;
   fontId: string;
+  /** Global Brand Font Token linked to this text layer */
+  fontToken?: BrandFontTokenId;
   fontWeight: number;
   fontStyle: 'normal' | 'italic';
   fontSize: number;
@@ -395,8 +431,15 @@ export interface LogoDocument {
   width: number;
   height: number;
   backgroundColor: string;
+  /** Global Brand Color Token linked to artboard background */
+  backgroundToken?: BrandColorTokenId;
   transparentBackground: boolean;
   backgroundLocked?: boolean;
+  /** Role / preset of this artboard in the multi-artboard workspace */
+  artboardRole?: ArtboardPresetKind;
+  /** Position on the infinite multi-artboard canvas */
+  canvasX?: number;
+  canvasY?: number;
   surfaceTexture?: SurfaceTextureConfig;
   groups?: LayerGroup[];
   layers: LogoLayer[];
@@ -429,6 +472,9 @@ export interface LogoProject {
   updatedAt: string;
   brief: BrandBrief;
   document: LogoDocument;
+  artboards?: LogoDocument[];
+  activeArtboardIndex?: number;
+  brandTokens?: BrandTokens;
 }
 
 export type StudioViewMode =

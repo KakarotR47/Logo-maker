@@ -1,4 +1,4 @@
-import { BrandBrief, LogoDocument, LogoProject } from '../types/logo';
+import { BrandBrief, BrandTokens, LogoDocument, LogoProject } from '../types/logo';
 import { nextLayerId } from './logoGenerator';
 
 export const PROJECTS_STORAGE_KEY = 'forma-logo-projects-v1';
@@ -8,6 +8,9 @@ export interface ActiveSessionSnapshot {
   activeProjectId: string | null;
   brief: BrandBrief;
   document: LogoDocument;
+  artboards?: LogoDocument[];
+  activeArtboardIndex?: number;
+  brandTokens?: BrandTokens;
   updatedAt: string;
 }
 
@@ -35,21 +38,48 @@ function isValidBrief(brief: unknown): brief is BrandBrief {
   );
 }
 
+function isValidBrandTokens(tokens: unknown): tokens is BrandTokens {
+  if (!tokens || typeof tokens !== 'object') return false;
+  const t = tokens as Partial<BrandTokens>;
+  return (
+    Boolean(t.colors?.primary?.hex) &&
+    Boolean(t.colors?.secondary?.hex) &&
+    Boolean(t.colors?.accent?.hex) &&
+    Boolean(t.colors?.text?.hex) &&
+    Boolean(t.colors?.background?.hex) &&
+    Boolean(t.fonts?.display?.fontId) &&
+    Boolean(t.fonts?.tagline?.fontId)
+  );
+}
+
 export function loadSavedProjects(): LogoProject[] {
   try {
     const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is LogoProject =>
-        Boolean(item) &&
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
-        typeof item.updatedAt === 'string' &&
-        isValidBrief(item.brief) &&
-        isValidDocument(item.document)
-    );
+    return parsed
+      .filter(
+        (item): item is LogoProject =>
+          Boolean(item) &&
+          typeof item.id === 'string' &&
+          typeof item.name === 'string' &&
+          typeof item.updatedAt === 'string' &&
+          isValidBrief(item.brief) &&
+          isValidDocument(item.document)
+      )
+      .map((item) => ({
+        ...item,
+        artboards:
+          Array.isArray(item.artboards) && item.artboards.every(isValidDocument) && item.artboards.length > 0
+            ? item.artboards
+            : undefined,
+        activeArtboardIndex:
+          typeof item.activeArtboardIndex === 'number' && item.activeArtboardIndex >= 0
+            ? item.activeArtboardIndex
+            : undefined,
+        brandTokens: isValidBrandTokens(item.brandTokens) ? item.brandTokens : undefined,
+      }));
   } catch {
     return [];
   }
@@ -72,10 +102,23 @@ export function loadActiveSession(): ActiveSessionSnapshot | null {
     if (!parsed || !isValidBrief(parsed.brief) || !isValidDocument(parsed.document)) {
       return null;
     }
+    const validArtboards =
+      Array.isArray(parsed.artboards) && parsed.artboards.every(isValidDocument) && parsed.artboards.length > 0
+        ? parsed.artboards
+        : undefined;
+    const validIndex =
+      typeof parsed.activeArtboardIndex === 'number' &&
+      parsed.activeArtboardIndex >= 0 &&
+      (!validArtboards || parsed.activeArtboardIndex < validArtboards.length)
+        ? parsed.activeArtboardIndex
+        : 0;
     return {
       activeProjectId: typeof parsed.activeProjectId === 'string' ? parsed.activeProjectId : null,
       brief: parsed.brief,
       document: parsed.document,
+      artboards: validArtboards,
+      activeArtboardIndex: validIndex,
+      brandTokens: isValidBrandTokens(parsed.brandTokens) ? parsed.brandTokens : undefined,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
   } catch {

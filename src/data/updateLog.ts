@@ -19,6 +19,74 @@ export interface BuildReleaseNote {
 
 export const STUDIO_UPDATE_LOG: BuildReleaseNote[] = [
   {
+    id: 'build-22',
+    buildLabel: 'Build 22',
+    title: 'Phase 23: Print Pre-Press & Studio Power Workflow',
+    dateLabel: 'November 2026',
+    summary:
+      'Added real-time CMYK Soft-Proofing with out-of-gamut Delta-E diagnostics and 1-click gamut snapping, exterior Crop Marks & registration targets, 3mm Bleed guides, dynamic 1x Clear-Space margin boxes, and a Spotlight-style Ctrl/Cmd + K Command Palette.',
+    changes: [
+      {
+        kind: 'added',
+        area: 'CMYK Soft-Proofing & Gamut Audit',
+        title: 'Print Proof (CMYK) Simulation & 1-Click Snap to Print Gamut',
+        details:
+          'Toggle Print Proof (CMYK) from the Pre-Press popover or Command Palette to preview how electric screen RGB neons compress into coated CMYK offset ink across all artboards, inspect ΔE gamut warnings per swatch and layer, and snap out-of-gamut colors to printable equivalents.',
+        filesEdited: ['src/utils/printPrepress.ts', 'src/components/PrintPrepressPopover.tsx', 'src/components/LogoCanvasEditor.tsx', 'src/App.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Crop Marks, Bleed & Clear Space',
+        title: 'Exterior Print Trim Marks, 3mm Bleed Guides & 1x Brand Clear Space',
+        details:
+          'Added independent toggles for standard exterior corner Crop Marks with 4-side registration targets and CMYK calibration strips, 3mm (12px) Bleed Guides, dynamic 1x Clear-Space exclusion margin boxes around the logo artwork, and 8% Safe Zone overlays.',
+        filesEdited: ['src/utils/printPrepress.ts', 'src/components/PrintPrepressPopover.tsx', 'src/components/LogoCanvasEditor.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Quick Command Palette (Ctrl/Cmd + K)',
+        title: 'Spotlight-Style Searchable Studio Action Bar',
+        details:
+          'Press Ctrl+K / Cmd+K anywhere in the studio (or click ⌘K in the header) to search and execute pre-press toggles, alignment actions, grouping/knockout/outline commands, responsive lockup creation, zoom framing, exports, and theme switching in milliseconds.',
+        filesEdited: ['src/utils/commandRegistry.ts', 'src/components/CommandPaletteModal.tsx', 'src/App.tsx'],
+      },
+    ],
+  },
+  {
+    id: 'build-21',
+    buildLabel: 'Build 21',
+    title: 'Phase 22: Multi-Artboard Canvas & Responsive Lockups',
+    dateLabel: 'November 2026',
+    summary:
+      'Upgraded the logo editor into an infinite pan-and-zoom multi-artboard workspace with 1-click responsive lockup presets (Primary Horizontal, Stacked Badge, App Icon / Favicon, Social Banner) plus live Global Brand Color & Font Tokens that propagate edits across every artboard simultaneously.',
+    changes: [
+      {
+        kind: 'added',
+        area: 'Infinite Multi-Artboard Workspace',
+        title: 'Side-by-Side Responsive Lockups & Spacebar + Drag Panning',
+        details:
+          'Add Primary Horizontal, Stacked Badge (800×800), App Icon / Favicon (512×512), Social Banner (1200×400), or duplicate artboards side-by-side on an infinite dot-grid stage. Hold Spacebar + Drag (or toggle the Hand tool), pan with trackpad/wheel, zoom with Ctrl/Cmd + Wheel, and jump between Fit and Fit All.',
+        filesEdited: ['src/utils/multiArtboard.ts', 'src/components/LogoCanvasEditor.tsx', 'src/App.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Global Brand Color & Font Tokens',
+        title: 'Live Cross-Artboard Color Swatches & Typography Tokens',
+        details:
+          'Link shapes, icons, dividers, text layers, and artboard backgrounds to Global Brand Tokens (Primary, Accent, Secondary, Text, Canvas BG, Display Font, Tagline Font). Editing any token in the Brand Kit sidebar or floating popovers updates every linked layer across all artboards at once.',
+        filesEdited: ['src/types/logo.ts', 'src/utils/brandTokens.ts', 'src/components/EditorLeftSidebar.tsx', 'src/components/FloatingContextToolbar.tsx', 'src/components/GradientPatternPicker.tsx'],
+      },
+      {
+        kind: 'upgraded',
+        area: 'Session & Project Persistence',
+        title: 'Multi-Artboard & Token Auto-Save Across Sessions',
+        details:
+          'All side-by-side artboards, active artboard index, per-layer token links, and global brand tokens persist automatically to local storage and saved Studio projects.',
+        filesEdited: ['src/utils/projectStorage.ts', 'src/App.tsx'],
+      },
+    ],
+  },
+  {
     id: 'build-20',
     buildLabel: 'Build 20',
     title: 'Phase 21: Compositing, Masks & Surface Textures',

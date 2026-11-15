@@ -3,7 +3,6 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +23,7 @@ function resolvePort(): number {
 
 const PORT = resolvePort();
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const IS_VERCEL = Boolean(process.env.VERCEL);
 
 const STYLE_DIRECTIVES: Record<string, string> = {
   'flat-silhouette':
@@ -91,9 +91,8 @@ function parseGeminiError(err: unknown): { status: number; message: string } {
   };
 }
 
-async function startServer() {
-  const app = express();
-  app.use(express.json({ limit: '10mb' }));
+const app = express();
+app.use(express.json({ limit: '10mb' }));
 
   app.get('/api/ai/status', (_req, res) => {
     res.json({
@@ -555,7 +554,9 @@ async function startServer() {
     }
   });
 
+async function startServer() {
   if (!IS_PRODUCTION) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -577,4 +578,8 @@ async function startServer() {
   });
 }
 
-void startServer();
+if (!IS_VERCEL) {
+  void startServer();
+}
+
+export default app;

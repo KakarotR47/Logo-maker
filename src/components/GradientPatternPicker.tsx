@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Plus, RotateCw, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, Link2, Plus, RotateCw, Trash2, Unlink } from 'lucide-react';
 import {
+  BrandTokens,
   ColorPalette,
   GradientStop,
   LayerGradient,
@@ -8,6 +9,7 @@ import {
   LogoLayer,
   PatternPresetKind,
 } from '../types/logo';
+import { BRAND_COLOR_TOKEN_ORDER } from '../utils/brandTokens';
 
 export type FillTabMode = 'solid' | 'linear' | 'radial' | 'pattern';
 
@@ -73,6 +75,7 @@ interface GradientPatternPickerProps {
   activePalette: ColorPalette;
   quickSwatches: string[];
   isText: boolean;
+  brandTokens?: BrandTokens;
   onUpdate: (patch: Partial<LogoLayer>) => void;
 }
 
@@ -81,6 +84,7 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
   activePalette,
   quickSwatches,
   isText,
+  brandTokens,
   onUpdate,
 }) => {
   const activeGradient: LayerGradient = useMemo(
@@ -462,32 +466,79 @@ export const GradientPatternPicker: React.FC<GradientPatternPickerProps> = ({
       {/* 1. SOLID TAB */}
       {currentTab === 'solid' && (
         <div className="space-y-2.5">
+          {brandTokens && (
+            <div className="rounded-lg border border-indigo-200/80 dark:border-indigo-500/30 bg-indigo-50/50 dark:bg-indigo-950/20 p-2 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                <span className="inline-flex items-center gap-1">
+                  <Link2 className="h-3 w-3" />
+                  {layer.fillToken
+                    ? `Linked: ${brandTokens.colors[layer.fillToken].label}`
+                    : 'Global Brand Tokens'}
+                </span>
+                {layer.fillToken && (
+                  <button
+                    type="button"
+                    onClick={() => onUpdate({ fillToken: undefined })}
+                    className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9.5px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-white/10 cursor-pointer"
+                  >
+                    <Unlink className="h-2.5 w-2.5" />
+                    Unlink
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {BRAND_COLOR_TOKEN_ORDER.map((tid) => {
+                  const tok = brandTokens.colors[tid];
+                  const isLinked = layer.fillToken === tid;
+                  return (
+                    <button
+                      key={tid}
+                      type="button"
+                      onClick={() => onUpdate({ fill: tok.hex, fillToken: tid })}
+                      title={`Link to ${tok.label} (${tok.hex})`}
+                      className={`relative h-6 flex-1 rounded-md border cursor-pointer transition-transform active:scale-95 ${
+                        isLinked
+                          ? 'ring-2 ring-indigo-600 dark:ring-indigo-400 ring-offset-1 border-black/30'
+                          : 'border-black/15 dark:border-white/20 hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: tok.hex }}
+                    >
+                      {isLinked && (
+                        <span className="sr-only">Linked to {tok.label}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-1.5">
             {quickSwatches.map((hex) => (
               <button
                 key={hex}
                 type="button"
-                onClick={() => onUpdate({ fill: hex })}
+                onClick={() => onUpdate({ fill: hex, fillToken: undefined })}
                 className={`h-7 w-7 rounded-lg border cursor-pointer ${
-                  layer.fill.toLowerCase() === hex.toLowerCase()
+                  !layer.fillToken && layer.fill.toLowerCase() === hex.toLowerCase()
                     ? 'ring-2 ring-indigo-500 ring-offset-1 border-black/30'
                     : 'border-black/15 dark:border-white/15'
                 }`}
                 style={{ backgroundColor: hex }}
-                title={hex}
+                title={`${hex} (Custom unlinked swatch)`}
               />
             ))}
             <input
               type="color"
               value={toSafeHex(layer.fill === 'transparent' ? '#141413' : layer.fill)}
-              onChange={(e) => onUpdate({ fill: e.target.value })}
+              onChange={(e) => onUpdate({ fill: e.target.value, fillToken: undefined })}
               aria-label="Primary fill color"
               className="h-7 w-8 cursor-pointer rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-transparent p-0.5"
             />
             {!isText && (
               <button
                 type="button"
-                onClick={() => onUpdate({ fill: 'transparent' })}
+                onClick={() => onUpdate({ fill: 'transparent', fillToken: undefined })}
                 className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] px-2 py-1 text-[10px] font-semibold hover:bg-slate-100 dark:hover:bg-[#252836] cursor-pointer"
               >
                 None

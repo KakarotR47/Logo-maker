@@ -11,9 +11,11 @@ import {
   FileCode2,
   Layers,
   LayoutGrid,
+  Link2,
   Lock,
   Palette,
   PenTool,
+  RefreshCw,
   Search,
   Shapes,
   Shuffle,
@@ -36,6 +38,9 @@ import {
 } from '../data/logoLibrary';
 import {
   BrandBrief,
+  BrandColorTokenId,
+  BrandFontTokenId,
+  BrandTokens,
   ColorPalette,
   DividerKind,
   FontOption,
@@ -49,6 +54,11 @@ import {
   TextLayer,
 } from '../types/logo';
 import { AiBrandBrainstormItem } from '../utils/aiApi';
+import {
+  BRAND_COLOR_TOKEN_ORDER,
+  BRAND_FONT_TOKEN_ORDER,
+  countTokenUsages,
+} from '../utils/brandTokens';
 import { batchLoadGoogleFonts, ensureFontOptionLoaded } from '../utils/googleFonts';
 import {
   ICONIFY_COLLECTIONS,
@@ -91,6 +101,8 @@ export interface UploadedSvgEntry {
 
 interface EditorLeftSidebarProps {
   doc: LogoDocument;
+  artboards?: LogoDocument[];
+  brandTokens?: BrandTokens;
   brief: BrandBrief;
   brandName: string;
   activePalette: ColorPalette;
@@ -112,6 +124,9 @@ interface EditorLeftSidebarProps {
   onApplyFontPairing: (pairing: FontPairing) => void;
   onApplyFontToSelectedOrPrimary: (font: FontOption) => void;
   onApplyPalette: (palette: ColorPalette) => void;
+  onUpdateColorToken?: (tokenId: BrandColorTokenId, hex: string) => void;
+  onUpdateFontToken?: (tokenId: BrandFontTokenId, font: FontOption) => void;
+  onSyncAllTokens?: () => void;
   onMagicRecolor?: () => void;
   onOpenVariations?: () => void;
   onSelectProTemplate?: (spec: ProTemplateSpec, applyCustomBrand: boolean) => void;
@@ -149,6 +164,8 @@ const RAIL_ITEMS: Array<{
 
 export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   doc,
+  artboards,
+  brandTokens,
   brief,
   brandName,
   activePalette,
@@ -170,6 +187,9 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   onApplyFontPairing,
   onApplyFontToSelectedOrPrimary,
   onApplyPalette,
+  onUpdateColorToken,
+  onUpdateFontToken,
+  onSyncAllTokens,
   onMagicRecolor,
   onOpenVariations,
   onSelectProTemplate,
@@ -375,6 +395,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             <button
               key={id}
               type="button"
+              data-testid={`sidebar-tab-${id}`}
               onClick={() => handleRailClick(id)}
               title={`${label}${isActive ? ' (click to collapse)' : ''}`}
               className={`relative group flex flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 flex-1 lg:flex-initial min-w-[60px] lg:w-[54px] text-[10px] font-semibold transition-all active:scale-95 cursor-pointer ${
@@ -1151,8 +1172,132 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             {/* ============================================================== */}
             {/* 4. BRAND TAB (Triad, Magic Recolor, 4 Variations, Palettes)    */}
             {/* ============================================================== */}
-            {activeTab === 'brand' && (
+            {activeTab === 'brand' && (() => {
+              const boardList = artboards && artboards.length > 0 ? artboards : [doc];
+              const usage = countTokenUsages(boardList);
+              return (
               <div className="space-y-3.5">
+                {brandTokens && onUpdateColorToken && onUpdateFontToken && (
+                  <div
+                    data-testid="global-brand-tokens-panel"
+                    className="rounded-xl border border-indigo-200/80 dark:border-indigo-500/30 bg-indigo-50/45 dark:bg-indigo-950/20 p-3 space-y-3 shadow-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-800 dark:text-indigo-200">
+                          <Link2 className="h-3.5 w-3.5" />
+                          Global Brand Tokens
+                        </p>
+                        <p className="text-[10px] text-slate-600 dark:text-slate-400">
+                          Synced live across {boardList.length}{' '}
+                          {boardList.length === 1 ? 'artboard' : 'artboards'}
+                        </p>
+                      </div>
+                      {onSyncAllTokens && (
+                        <button
+                          type="button"
+                          onClick={onSyncAllTokens}
+                          title="Auto-link layers matching brand colors & fonts across all artboards"
+                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 dark:border-indigo-500/40 bg-white dark:bg-[#181B23] px-2 py-1 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 cursor-pointer shrink-0"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Re-link
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Global Color Tokens */}
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Color Swatches
+                      </p>
+                      <div className="space-y-1.5">
+                        {BRAND_COLOR_TOKEN_ORDER.map((tid) => {
+                          const tok = brandTokens.colors[tid];
+                          const count = usage.colorCounts[tid];
+                          return (
+                            <label
+                              key={tid}
+                              className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-2.5 py-1.5 text-[11px] cursor-pointer hover:border-indigo-400/70 transition-colors"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <input
+                                  type="color"
+                                  data-testid={`brand-token-color-${tid}`}
+                                  value={tok.hex}
+                                  onChange={(e) => onUpdateColorToken(tid, e.target.value)}
+                                  aria-label={tok.label}
+                                  className="h-6 w-6 shrink-0 cursor-pointer rounded-md border border-black/15 bg-transparent p-0"
+                                />
+                                <div className="min-w-0">
+                                  <p className="truncate font-semibold text-slate-800 dark:text-slate-100 leading-tight">
+                                    {tok.label}
+                                  </p>
+                                  <p className="font-mono-num text-[9.5px] text-slate-500 dark:text-slate-400">
+                                    {tok.hex}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="rounded-md bg-slate-100 dark:bg-[#0F1117] px-1.5 py-0.5 font-mono-num text-[9.5px] font-semibold text-slate-600 dark:text-slate-300 shrink-0">
+                                {count} linked
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Global Font Tokens */}
+                    <div className="space-y-1.5 pt-1 border-t border-indigo-200/70 dark:border-indigo-500/20">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Typography Tokens
+                      </p>
+                      <div className="space-y-2">
+                        {BRAND_FONT_TOKEN_ORDER.map((fid) => {
+                          const fTok = brandTokens.fonts[fid];
+                          const count = usage.fontCounts[fid];
+                          return (
+                            <div
+                              key={fid}
+                              className="rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] p-2 space-y-1"
+                            >
+                              <div className="flex items-center justify-between text-[10.5px]">
+                                <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                  {fTok.label}
+                                </span>
+                                <span className="font-mono-num text-[9.5px] text-slate-500 dark:text-slate-400">
+                                  {count} text
+                                </span>
+                              </div>
+                              <select
+                                data-testid={`brand-token-font-${fid}`}
+                                value={fTok.fontId}
+                                onChange={(e) => {
+                                  const chosen = FONT_OPTIONS.find(
+                                    (f) => f.id === e.target.value
+                                  );
+                                  if (chosen) {
+                                    void ensureFontOptionLoaded(chosen);
+                                    onUpdateFontToken(fid, chosen);
+                                  }
+                                }}
+                                aria-label={fTok.label}
+                                className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#0F1117] px-2 py-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100 focus:border-indigo-500 focus:outline-none cursor-pointer"
+                              >
+                                {FONT_OPTIONS.map((opt) => (
+                                  <option key={opt.id} value={opt.id}>
+                                    {opt.name} ({opt.category})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-[#F1F3F6]/70 dark:bg-[#1E222D] p-3 space-y-2.5 shadow-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
@@ -1245,7 +1390,8 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                   })}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* ============================================================== */}
             {/* 5. AI MAGIC TAB                                                */}

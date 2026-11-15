@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
+  Command,
   Download,
   History,
   LayoutTemplate,
@@ -16,10 +17,15 @@ import { BrandBriefGrid } from './components/BrandBriefGrid';
 import { BrandKitView } from './components/BrandKitView';
 import { TracedSymbolPayload } from './components/AiMagicPanel';
 import { ClientPreviewView } from './components/ClientPreviewView';
+import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { EditorLeftSidebar, UploadedSvgEntry } from './components/EditorLeftSidebar';
 import { ExportModal } from './components/ExportModal';
 import { LandingView } from './components/LandingView';
-import { CanvasToolMode, LogoCanvasEditor } from './components/LogoCanvasEditor';
+import {
+  CanvasToolMode,
+  LogoCanvasEditor,
+  ViewportCommandHandle,
+} from './components/LogoCanvasEditor';
 import { LogoWizardModal } from './components/LogoWizardModal';
 import { MockupPreviewView } from './components/MockupPreviewView';
 import { ProjectsDashboard } from './components/ProjectsDashboard';
@@ -35,7 +41,11 @@ import {
   VECTOR_ICONS,
 } from './data/logoLibrary';
 import {
+  ArtboardPresetKind,
   BrandBrief,
+  BrandColorTokenId,
+  BrandFontTokenId,
+  BrandTokens,
   ColorPalette,
   CustomSvgLayer,
   DividerKind,
@@ -57,10 +67,22 @@ import {
 import { PlanTier } from './types/monetization';
 import { AiBrandBrainstormItem } from './utils/aiApi';
 import {
+  applyColorTokenToArtboards,
+  applyFontTokenToArtboards,
+  applyPaletteToAllArtboards,
+  createDefaultBrandTokens,
+  linkDocumentToBrandTokens,
+  tokensToPalette,
+} from './utils/brandTokens';
+import {
   generateFourLogoVariations,
   LogoVariationEntry,
   magicRecolorDocument,
 } from './utils/brandTools';
+import {
+  buildResponsiveLockupArtboard,
+  resetArtboardPositions,
+} from './utils/multiArtboard';
 import { loadGoogleFont } from './utils/googleFonts';
 import {
   buildDocumentForArchetype,
@@ -83,6 +105,12 @@ import {
   createClippingMaskFromSelection,
   isCombinableVectorLayer,
 } from './utils/booleanOps';
+import { StudioCommandItem } from './utils/commandRegistry';
+import {
+  auditDocumentPrintGamut,
+  simulateCmykProofColor,
+  snapDocumentToPrintGamut,
+} from './utils/printPrepress';
 import { ClientSharePayload, parseClientShareFromSearch } from './utils/clientShare';
 import { parseUploadedSvgToLayer } from './utils/svgExport';
 import { buildDocumentFromTemplate, ProTemplateSpec } from './utils/templateLibrary';
@@ -91,10 +119,48 @@ import { convertTextLayerToPath } from './utils/textToPath';
 
 const BRAND_KITS_KEY = 'forma-logo-brand-kits-v1';
 
+interface WorkspaceState {
+  artboards: LogoDocument[];
+  activeArtboardIndex: number;
+  tokens: BrandTokens;
+}
+
 interface HistoryState {
-  past: LogoDocument[];
-  present: LogoDocument;
-  future: LogoDocument[];
+  past: WorkspaceState[];
+  present: WorkspaceState;
+  future: WorkspaceState[];
+}
+
+function buildInitialWorkspace(
+  session: ReturnType<typeof loadActiveSession>
+): WorkspaceState {
+  const b = session?.brief ?? DEFAULT_BRAND_BRIEF;
+  const pal = resolvePalette(b.paletteId);
+  const pFont = resolveFont(b.primaryFontId);
+  const sFont = resolveFont(b.secondaryFontId);
+  const rawList =
+    session?.artboards && session.artboards.length > 0
+      ? session.artboards
+      : [session?.document ?? buildDocumentForArchetype(b, 'icon-left')];
+  const baseDoc = rawList[0];
+  const tokens: BrandTokens =
+    session?.brandTokens ??
+    createDefaultBrandTokens(
+      { ...pal, background: baseDoc.backgroundColor || pal.background },
+      pFont,
+      sFont
+    );
+  const artboards: LogoDocument[] = rawList.map((ab, idx) => {
+    const linked = linkDocumentToBrandTokens(ab, tokens);
+    return idx === 0 && !linked.artboardRole
+      ? { ...linked, artboardRole: 'primary-horizontal' as ArtboardPresetKind }
+      : linked;
+  });
+  const idx = Math.min(
+    Math.max(0, session?.activeArtboardIndex ?? 0),
+    Math.max(0, artboards.length - 1)
+  );
+  return { artboards, activeArtboardIndex: idx, tokens };
 }
 
 export default function App() {
@@ -106,7 +172,15 @@ export default function App() {
   }
   const initialSession = initialSessionRef.current;
 
-  const [viewMode, setViewMode] = useState<StudioViewMode>('landing');
+  const [viewMode, setViewMode] = useState<StudioViewMode>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('autostart') === '1' && !params.get('client')) {
+        return 'editor';
+      }
+    }
+    return 'landing';
+  });
   const [studioTheme, setStudioTheme] = useState<'light' | 'dark'>(() => {
     try {
       return localStorage.getItem('forma-studio-theme') === 'dark' ? 'dark' : 'light';
@@ -124,14 +198,10 @@ export default function App() {
 
   const [history, setHistory] = useState<HistoryState>(() => ({
     past: [],
-    present:
-      initialSession?.document ??
-      buildDocumentForArchetype(DEFAULT_BRAND_BRIEF, 'icon-left'),
+    present: buildInitialWorkspace(initialSession),
     future: [],
   }));
 
-  const [pages, setPages] = useState<LogoDocument[]>(() => [history.present]);
-  const [activePageIndex, setActivePageIndex] = useState<number>(0);
   const [uploadedSvgs, setUploadedSvgs] = useState<UploadedSvgEntry[]>([]);
 
   const [projects, setProjects] = useState<LogoProject[]>(() => loadSavedProjects());
@@ -158,7 +228,26 @@ export default function App() {
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
   const [canvasToolMode, setCanvasToolMode] = useState<CanvasToolMode>('select');
   const [penAttachTextId, setPenAttachTextId] = useState<string | null>(null);
+  const [printProofCmyk, setPrintProofCmyk] = useState<boolean>(false);
+  const [showCropMarks, setShowCropMarks] = useState<boolean>(false);
+  const [showBleed, setShowBleed] = useState<boolean>(false);
+  const [showClearSpace, setShowClearSpace] = useState<boolean>(false);
+  const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+  const viewportCommandRef = useRef<ViewportCommandHandle | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        e.stopPropagation();
+        setCommandPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown, true);
+  }, []);
 
   // Detect standalone ?client=... share link on startup
   useEffect(() => {
@@ -166,10 +255,17 @@ export default function App() {
     let active = true;
     void parseClientShareFromSearch(window.location.search).then((res) => {
       if (!active || !res) return;
+      const pal = resolvePalette(res.payload.brief.paletteId);
+      const pFont = resolveFont(res.payload.brief.primaryFontId);
+      const sFont = resolveFont(res.payload.brief.secondaryFontId);
+      const tokens = createDefaultBrandTokens(pal, pFont, sFont);
+      const linked = linkDocumentToBrandTokens(res.payload.doc, tokens);
       setBrief(res.payload.brief);
-      setHistory({ past: [], present: res.payload.doc, future: [] });
-      setPages([res.payload.doc]);
-      setActivePageIndex(0);
+      setHistory({
+        past: [],
+        present: { artboards: [linked], activeArtboardIndex: 0, tokens },
+        future: [],
+      });
       setClientPreviewSession({
         payload: res.payload,
         token: res.token,
@@ -200,14 +296,17 @@ export default function App() {
     }
   }, [studioTheme]);
 
-  const [customPalette, setCustomPalette] = useState<ColorPalette | null>(null);
-  const activeDoc = history.present;
+  const workspace = history.present;
+  const artboards = workspace.artboards;
+  const activeArtboardIndex = Math.min(
+    workspace.activeArtboardIndex,
+    Math.max(0, artboards.length - 1)
+  );
+  const brandTokens = workspace.tokens;
+  const activeDoc = artboards[activeArtboardIndex] ?? artboards[0];
   const activePalette = useMemo(
-    () =>
-      customPalette && customPalette.id === brief.paletteId
-        ? customPalette
-        : resolvePalette(brief.paletteId),
-    [brief.paletteId, customPalette]
+    () => tokensToPalette(brandTokens, resolvePalette(brief.paletteId)),
+    [brandTokens, brief.paletteId]
   );
   const selectedLayers = useMemo(
     () => activeDoc.layers.filter((l) => selectedLayerIds.includes(l.id)),
@@ -245,24 +344,30 @@ export default function App() {
     if (trimmed === activeDoc.title) return;
     setHistory((prev) => ({
       ...prev,
-      present: { ...prev.present, title: trimmed },
+      present: {
+        ...prev.present,
+        artboards: prev.present.artboards.map((ab, idx) =>
+          idx === prev.present.activeArtboardIndex ? { ...ab, title: trimmed } : ab
+        ),
+      },
     }));
     if (activeProjectId) {
       handleRenameProject(activeProjectId, trimmed);
     }
   };
 
-  // Memoize active font signature so pointer drags don't re-run font loading
+  // Memoize active font signature across all artboards so pointer drags don't re-run font loading
   const activeFontSignature = useMemo(
     () =>
-      activeDoc.layers
+      artboards
+        .flatMap((ab) => ab.layers)
         .filter((l): l is TextLayer => l.type === 'text')
         .map((l) => `${l.fontFamily}::${l.fontWeight}`)
         .join('|'),
-    [activeDoc.layers]
+    [artboards]
   );
 
-  // Dynamically ensure every Google Font used on the active canvas is loaded
+  // Dynamically ensure every Google Font used across all artboards is loaded
   useEffect(() => {
     if (!activeFontSignature) return;
     activeFontSignature.split('|').forEach((entry) => {
@@ -280,12 +385,18 @@ export default function App() {
     activeProjectId,
     brief,
     activeDoc,
+    artboards,
+    activeArtboardIndex,
+    brandTokens,
     projects,
   });
   latestAutosaveRef.current = {
     activeProjectId,
     brief,
     activeDoc,
+    artboards,
+    activeArtboardIndex,
+    brandTokens,
     projects,
   };
   const hasHydratedAutosaveRef = useRef(false);
@@ -298,14 +409,24 @@ export default function App() {
 
     setAutoSaveState('saving');
     const timer = window.setTimeout(() => {
-      const { activeProjectId: pid, brief: b, activeDoc: doc, projects: list } =
-        latestAutosaveRef.current;
+      const {
+        activeProjectId: pid,
+        brief: b,
+        activeDoc: doc,
+        artboards: abs,
+        activeArtboardIndex: abIdx,
+        brandTokens: toks,
+        projects: list,
+      } = latestAutosaveRef.current;
       const now = new Date().toISOString();
 
       persistActiveSession({
         activeProjectId: pid,
         brief: b,
         document: doc,
+        artboards: abs,
+        activeArtboardIndex: abIdx,
+        brandTokens: toks,
         updatedAt: now,
       });
 
@@ -316,6 +437,9 @@ export default function App() {
                 ...p,
                 brief: b,
                 document: doc,
+                artboards: abs,
+                activeArtboardIndex: abIdx,
+                brandTokens: toks,
                 updatedAt: now,
               }
             : p
@@ -328,23 +452,43 @@ export default function App() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [brief, activeDoc, activeProjectId]);
+  }, [brief, workspace, activeProjectId]);
 
   // Flush current session synchronously when backgrounding or closing tab
   useEffect(() => {
     const flushNow = () => {
-      const { activeProjectId: pid, brief: b, activeDoc: doc, projects: list } =
-        latestAutosaveRef.current;
+      const {
+        activeProjectId: pid,
+        brief: b,
+        activeDoc: doc,
+        artboards: abs,
+        activeArtboardIndex: abIdx,
+        brandTokens: toks,
+        projects: list,
+      } = latestAutosaveRef.current;
       const now = new Date().toISOString();
       persistActiveSession({
         activeProjectId: pid,
         brief: b,
         document: doc,
+        artboards: abs,
+        activeArtboardIndex: abIdx,
+        brandTokens: toks,
         updatedAt: now,
       });
       if (pid && list.some((p) => p.id === pid)) {
         const nextProjects = list.map((p) =>
-          p.id === pid ? { ...p, brief: b, document: doc, updatedAt: now } : p
+          p.id === pid
+            ? {
+                ...p,
+                brief: b,
+                document: doc,
+                artboards: abs,
+                activeArtboardIndex: abIdx,
+                brandTokens: toks,
+                updatedAt: now,
+              }
+            : p
         );
         persistSavedProjects(nextProjects);
       }
@@ -364,12 +508,38 @@ export default function App() {
     };
   }, []);
 
+  const commitWorkspace = (nextState: WorkspaceState) => {
+    setHistory((prev) => ({
+      past: [...prev.past.slice(-49), prev.present],
+      present: nextState,
+      future: [],
+    }));
+  };
+
   const commitDocument = (nextDoc: LogoDocument) => {
     setHistory((prev) => ({
       past: [...prev.past.slice(-49), prev.present],
-      present: nextDoc,
+      present: {
+        ...prev.present,
+        artboards: prev.present.artboards.map((ab, idx) =>
+          idx === prev.present.activeArtboardIndex ? nextDoc : ab
+        ),
+      },
       future: [],
     }));
+  };
+
+  const resetHistoryWithDoc = (rawDoc: LogoDocument, tokensOverride?: BrandTokens) => {
+    const nextTokens = tokensOverride ?? brandTokens;
+    const linked = linkDocumentToBrandTokens(rawDoc, nextTokens);
+    const first: LogoDocument = linked.artboardRole
+      ? linked
+      : { ...linked, artboardRole: 'primary-horizontal' };
+    setHistory({
+      past: [],
+      present: { artboards: [first], activeArtboardIndex: 0, tokens: nextTokens },
+      future: [],
+    });
   };
 
   const handleUndo = () => {
@@ -397,13 +567,20 @@ export default function App() {
   };
 
   const handlePreviewLayersChange = (layersMap: Record<string, LogoLayer>) => {
-    setHistory((prev) => ({
-      ...prev,
-      present: {
-        ...prev.present,
-        layers: prev.present.layers.map((l) => layersMap[l.id] ?? l),
-      },
-    }));
+    setHistory((prev) => {
+      const idx = prev.present.activeArtboardIndex;
+      return {
+        ...prev,
+        present: {
+          ...prev.present,
+          artboards: prev.present.artboards.map((ab, i) =>
+            i === idx
+              ? { ...ab, layers: ab.layers.map((l) => layersMap[l.id] ?? l) }
+              : ab
+          ),
+        },
+      };
+    });
   };
 
   const handleCommitLayersChange = (
@@ -411,17 +588,26 @@ export default function App() {
     afterMap: Record<string, LogoLayer>
   ) => {
     setHistory((prev) => {
-      const docWithBefore: LogoDocument = {
+      const idx = prev.present.activeArtboardIndex;
+      const beforeWs: WorkspaceState = {
         ...prev.present,
-        layers: prev.present.layers.map((l) => beforeMap[l.id] ?? l),
+        artboards: prev.present.artboards.map((ab, i) =>
+          i === idx
+            ? { ...ab, layers: ab.layers.map((l) => beforeMap[l.id] ?? l) }
+            : ab
+        ),
       };
-      const docWithAfter: LogoDocument = {
+      const afterWs: WorkspaceState = {
         ...prev.present,
-        layers: prev.present.layers.map((l) => afterMap[l.id] ?? l),
+        artboards: prev.present.artboards.map((ab, i) =>
+          i === idx
+            ? { ...ab, layers: ab.layers.map((l) => afterMap[l.id] ?? l) }
+            : ab
+        ),
       };
       return {
-        past: [...prev.past.slice(-49), docWithBefore],
-        present: docWithAfter,
+        past: [...prev.past.slice(-49), beforeWs],
+        present: afterWs,
         future: [],
       };
     });
@@ -470,10 +656,21 @@ export default function App() {
   };
 
   const handleOpenConceptInEditor = (concept: LogoConcept) => {
-    commitDocument(concept.document);
-    setPages([concept.document]);
-    setActivePageIndex(0);
-    setSelectedLayerIds(concept.document.layers[0] ? [concept.document.layers[0].id] : []);
+    const pal = resolvePalette(brief.paletteId);
+    const pFont = resolveFont(brief.primaryFontId);
+    const sFont = resolveFont(brief.secondaryFontId);
+    const nextTokens = createDefaultBrandTokens(
+      { ...pal, background: concept.document.backgroundColor || pal.background },
+      pFont,
+      sFont
+    );
+    const linked = linkDocumentToBrandTokens(concept.document, nextTokens);
+    commitWorkspace({
+      artboards: [{ ...linked, artboardRole: 'primary-horizontal' }],
+      activeArtboardIndex: 0,
+      tokens: nextTokens,
+    });
+    setSelectedLayerIds(linked.layers[0] ? [linked.layers[0].id] : []);
     setViewMode('editor');
   };
 
@@ -493,8 +690,11 @@ export default function App() {
       visible: true,
       locked: false,
       fill: activePalette.primary,
+      fillToken: 'primary',
       accentFill: activePalette.accent,
+      accentFillToken: 'accent',
       secondaryFill: activePalette.secondary,
+      secondaryFillToken: 'secondary',
       stroke: 'none',
       strokeWidth: 0,
       shadow: {
@@ -510,6 +710,7 @@ export default function App() {
   };
 
   const handleAddShape = (shapeKind: ShapeKind) => {
+    const isHollow = shapeKind === 'ring' || shapeKind === 'frame';
     const layer: LogoLayer = {
       id: nextLayerId('shp'),
       name: `Shape (${shapeKind})`,
@@ -524,9 +725,11 @@ export default function App() {
       opacity: 1,
       visible: true,
       locked: false,
-      fill: shapeKind === 'ring' || shapeKind === 'frame' ? 'transparent' : activePalette.secondary,
-      stroke: shapeKind === 'ring' || shapeKind === 'frame' ? activePalette.primary : 'none',
-      strokeWidth: shapeKind === 'ring' || shapeKind === 'frame' ? 5 : 0,
+      fill: isHollow ? 'transparent' : activePalette.secondary,
+      fillToken: isHollow ? undefined : 'secondary',
+      stroke: isHollow ? activePalette.primary : 'none',
+      strokeToken: isHollow ? 'primary' : undefined,
+      strokeWidth: isHollow ? 5 : 0,
       shadow: {
         enabled: false,
         color: 'rgba(17, 24, 39, 0.18)',
@@ -554,6 +757,7 @@ export default function App() {
       visible: true,
       locked: false,
       fill: activePalette.accent,
+      fillToken: 'accent',
       stroke: 'none',
       strokeWidth: 0,
       shadow: {
@@ -584,41 +788,102 @@ export default function App() {
       x: activeDoc.width / 2,
       y: activeDoc.height / 2,
     });
-    commitDocument({ ...activeDoc, layers: [...activeDoc.layers, layer] });
+    commitDocument({
+      ...activeDoc,
+      layers: [...activeDoc.layers, { ...layer, fillToken: 'primary' }],
+    });
     setSelectedLayerIds([layer.id]);
   };
 
-  const handleSwitchPage = (index: number) => {
-    if (index === activePageIndex || index < 0 || index >= pages.length) return;
-    const syncedPages = pages.map((p, i) => (i === activePageIndex ? activeDoc : p));
-    const targetDoc = syncedPages[index];
-    setPages(syncedPages);
-    setActivePageIndex(index);
-    setHistory({ past: [], present: targetDoc, future: [] });
+  const handleSwitchArtboard = (index: number, selectIds: string[] = []) => {
+    if (index < 0 || index >= artboards.length) return;
+    if (index !== activeArtboardIndex) {
+      setHistory((prev) => ({
+        ...prev,
+        present: {
+          ...prev.present,
+          activeArtboardIndex: index,
+        },
+      }));
+    }
+    setSelectedLayerIds(selectIds);
+  };
+
+  const handleAddResponsiveArtboard = (preset: ArtboardPresetKind) => {
+    const created = buildResponsiveLockupArtboard(
+      preset,
+      brief,
+      brandTokens,
+      activeDoc
+    );
+    const linked = linkDocumentToBrandTokens(created, brandTokens);
+    const nextArtboards = [...artboards, linked];
+    commitWorkspace({
+      ...workspace,
+      artboards: nextArtboards,
+      activeArtboardIndex: nextArtboards.length - 1,
+    });
+    setSelectedLayerIds([]);
+    showEditorNotice(`Added ${linked.title} side-by-side · Linked to Global Brand Tokens`);
+  };
+
+  const handleRemoveArtboard = (index: number) => {
+    if (artboards.length <= 1) return;
+    const nextArtboards = artboards.filter((_, i) => i !== index);
+    const nextIndex = Math.min(activeArtboardIndex, nextArtboards.length - 1);
+    commitWorkspace({
+      ...workspace,
+      artboards: nextArtboards,
+      activeArtboardIndex: nextIndex,
+    });
     setSelectedLayerIds([]);
   };
 
-  const handleAddPage = () => {
-    const syncedPages = pages.map((p, i) => (i === activePageIndex ? activeDoc : p));
-    const nextNum = syncedPages.length + 1;
-    const copyDoc = cloneDocumentForProject(activeDoc, `${activeDoc.title} · Page ${nextNum}`);
-    copyDoc.id = nextLayerId('doc');
-    const nextPages = [...syncedPages, copyDoc];
-    setPages(nextPages);
-    setActivePageIndex(nextPages.length - 1);
-    setHistory({ past: [], present: copyDoc, future: [] });
-    setSelectedLayerIds([]);
+  const handleArrangeArtboards = () => {
+    const arranged = resetArtboardPositions(artboards);
+    commitWorkspace({
+      ...workspace,
+      artboards: arranged,
+    });
   };
 
-  const handleRemovePage = (index: number) => {
-    if (pages.length <= 1) return;
-    const syncedPages = pages.map((p, i) => (i === activePageIndex ? activeDoc : p));
-    const nextPages = syncedPages.filter((_, i) => i !== index);
-    const nextIndex = Math.min(activePageIndex, nextPages.length - 1);
-    setPages(nextPages);
-    setActivePageIndex(nextIndex);
-    setHistory({ past: [], present: nextPages[nextIndex], future: [] });
-    setSelectedLayerIds([]);
+  const handleUpdateColorToken = (tokenId: BrandColorTokenId, hex: string) => {
+    const { tokens: nextTokens, artboards: nextArtboards } =
+      applyColorTokenToArtboards(artboards, brandTokens, tokenId, hex);
+    commitWorkspace({
+      ...workspace,
+      tokens: nextTokens,
+      artboards: nextArtboards,
+    });
+  };
+
+  const handleUpdateFontToken = (tokenId: BrandFontTokenId, font: FontOption) => {
+    void loadGoogleFont(font.name, font.weights);
+    const { tokens: nextTokens, artboards: nextArtboards } =
+      applyFontTokenToArtboards(artboards, brandTokens, tokenId, font);
+    setBrief((b) => ({
+      ...b,
+      primaryFontId: tokenId === 'display' ? font.id : b.primaryFontId,
+      secondaryFontId: tokenId === 'tagline' ? font.id : b.secondaryFontId,
+    }));
+    commitWorkspace({
+      ...workspace,
+      tokens: nextTokens,
+      artboards: nextArtboards,
+    });
+  };
+
+  const handleSyncAllTokens = () => {
+    const nextArtboards = artboards.map((ab) =>
+      linkDocumentToBrandTokens(ab, brandTokens)
+    );
+    commitWorkspace({
+      ...workspace,
+      artboards: nextArtboards,
+    });
+    showEditorNotice(
+      `Synced all ${nextArtboards.length} artboard${nextArtboards.length > 1 ? 's' : ''} to Global Brand Tokens`
+    );
   };
 
   const handleInsertTracedSymbol = (payload: TracedSymbolPayload) => {
@@ -698,8 +963,8 @@ export default function App() {
   const handleAddText = (preset: 'heading' | 'tagline' | 'curved') => {
     const font =
       preset === 'tagline'
-        ? resolveFont(brief.secondaryFontId)
-        : resolveFont(brief.primaryFontId);
+        ? resolveFont(brandTokens.fonts.tagline.fontId)
+        : resolveFont(brandTokens.fonts.display.fontId);
 
     const layer: TextLayer = {
       id: nextLayerId('txt'),
@@ -723,6 +988,7 @@ export default function App() {
       visible: true,
       locked: false,
       fill: preset === 'tagline' ? activePalette.accent : activePalette.text,
+      fillToken: preset === 'tagline' ? 'accent' : 'text',
       stroke: 'none',
       strokeWidth: 0,
       shadow: {
@@ -734,6 +1000,7 @@ export default function App() {
       },
       fontFamily: font.cssFamily,
       fontId: font.id,
+      fontToken: preset === 'tagline' ? 'tagline' : 'display',
       fontWeight: preset === 'tagline' ? 600 : 700,
       fontStyle: 'normal',
       fontSize: preset === 'tagline' ? 18 : preset === 'curved' ? 32 : 52,
@@ -767,30 +1034,25 @@ export default function App() {
   const handleApplyFontPairing = (pairing: FontPairing) => {
     const pFont = resolveFont(pairing.primaryFontId);
     const sFont = resolveFont(pairing.secondaryFontId);
+    void loadGoogleFont(pFont.name, pFont.weights);
+    void loadGoogleFont(sFont.name, sFont.weights);
     setBrief((b) => ({
       ...b,
       primaryFontId: pFont.id,
       secondaryFontId: sFont.id,
     }));
 
-    const textLayers = activeDoc.layers.filter((l): l is TextLayer => l.type === 'text');
-    if (textLayers.length === 0) return;
-
-    const largestId = textLayers.reduce((best, cur) =>
-      cur.fontSize >= best.fontSize ? cur : best
-    ).id;
-
-    commitDocument({
-      ...activeDoc,
-      layers: activeDoc.layers.map((l) => {
-        if (l.type !== 'text') return l;
-        const chosen = l.id === largestId ? pFont : sFont;
-        return { ...l, fontId: chosen.id, fontFamily: chosen.cssFamily };
-      }),
+    const step1 = applyFontTokenToArtboards(artboards, brandTokens, 'display', pFont);
+    const step2 = applyFontTokenToArtboards(step1.artboards, step1.tokens, 'tagline', sFont);
+    commitWorkspace({
+      ...workspace,
+      tokens: step2.tokens,
+      artboards: step2.artboards,
     });
   };
 
   const handleApplyFontToSelectedOrPrimary = (font: FontOption) => {
+    void loadGoogleFont(font.name, font.weights);
     const selectedTexts = selectedLayers.filter((l): l is TextLayer => l.type === 'text');
     if (selectedTexts.length > 0) {
       const targetIds = new Set(selectedTexts.map((t) => t.id));
@@ -798,77 +1060,49 @@ export default function App() {
         ...activeDoc,
         layers: activeDoc.layers.map((l) =>
           targetIds.has(l.id) && l.type === 'text'
-            ? { ...l, fontId: font.id, fontFamily: font.cssFamily }
+            ? { ...l, fontId: font.id, fontFamily: font.cssFamily, fontToken: undefined }
             : l
         ),
       });
       return;
     }
 
-    const firstText = activeDoc.layers.find((l): l is TextLayer => l.type === 'text');
-    if (firstText) {
-      commitDocument({
-        ...activeDoc,
-        layers: activeDoc.layers.map((l) =>
-          l.id === firstText.id && l.type === 'text'
-            ? { ...l, fontId: font.id, fontFamily: font.cssFamily }
-            : l
-        ),
-      });
-      setSelectedLayerIds([firstText.id]);
-    }
+    handleUpdateFontToken('display', font);
   };
 
-  const handleApplyPalette = (pal: ColorPalette, targetDoc: LogoDocument = activeDoc) => {
-    setCustomPalette(pal);
+  const handleApplyPalette = (pal: ColorPalette, targetDoc?: LogoDocument) => {
     setBrief((b) => ({ ...b, paletteId: pal.id }));
-    commitDocument({
-      ...targetDoc,
-      backgroundColor: pal.background,
-      layers: targetDoc.layers.map((l, idx) => {
-        if (l.type === 'icon') {
-          const onDarkShape = targetDoc.layers.some(
-            (s) => s.type === 'shape' && s.fill !== 'transparent' && s.fill !== targetDoc.backgroundColor
-          );
-          return {
-            ...l,
-            fill: onDarkShape ? pal.background : pal.primary,
-            accentFill: pal.accent,
-            secondaryFill: pal.secondary,
-          };
-        }
-        if (l.type === 'shape') {
-          if (l.fill === 'transparent') {
-            return { ...l, stroke: idx === 0 ? pal.primary : pal.accent };
-          }
-          return {
-            ...l,
-            fill: idx === 0 ? pal.primary : pal.secondary,
-            stroke: l.strokeWidth > 0 ? pal.primary : 'none',
-          };
-        }
-        if (l.type === 'divider') {
-          return { ...l, fill: pal.accent };
-        }
-        if (l.type === 'text' || l.type === 'path') {
-          const isSmallTagline = l.type === 'text' && l.fontSize <= 22;
-          return { ...l, fill: isSmallTagline ? pal.accent : pal.text };
-        }
-        return { ...l, fill: pal.primary };
-      }),
+    const workingArtboards = targetDoc
+      ? artboards.map((ab, idx) => (idx === activeArtboardIndex ? targetDoc : ab))
+      : artboards;
+    const { tokens: nextTokens, artboards: nextArtboards } = applyPaletteToAllArtboards(
+      workingArtboards,
+      brandTokens,
+      pal
+    );
+    commitWorkspace({
+      ...workspace,
+      tokens: nextTokens,
+      artboards: nextArtboards,
     });
   };
 
   const handleApplyRemixedDocument = (remixedDoc: LogoDocument, pal: ColorPalette) => {
-    setCustomPalette(pal);
     setBrief((b) => ({ ...b, paletteId: pal.id }));
-    commitDocument(remixedDoc);
+    const pFont = resolveFont(brief.primaryFontId);
+    const sFont = resolveFont(brief.secondaryFontId);
+    const nextTokens = createDefaultBrandTokens(pal, pFont, sFont);
+    const linked = linkDocumentToBrandTokens(remixedDoc, nextTokens);
+    commitWorkspace({
+      ...workspace,
+      tokens: nextTokens,
+      artboards: artboards.map((ab, idx) => (idx === activeArtboardIndex ? linked : ab)),
+    });
     setSelectedLayerIds([]);
     showEditorNotice(`Applied remix: ${remixedDoc.title}`);
   };
 
   const handleApplyBrandBrainstorm = (item: AiBrandBrainstormItem) => {
-    setCustomPalette(item.palette);
     setBrief((b) => ({
       ...b,
       businessName: item.brandName,
@@ -1441,9 +1675,15 @@ export default function App() {
 
   const handleLoadKit = (kit: SavedBrandKit) => {
     setBrief(kit.brief);
-    commitDocument(kit.primaryDocument);
-    setPages([kit.primaryDocument]);
-    setActivePageIndex(0);
+    const pFont = resolveFont(kit.brief.primaryFontId);
+    const sFont = resolveFont(kit.brief.secondaryFontId);
+    const nextTokens = createDefaultBrandTokens(kit.palette, pFont, sFont);
+    const linked = linkDocumentToBrandTokens(kit.primaryDocument, nextTokens);
+    commitWorkspace({
+      artboards: [{ ...linked, artboardRole: 'primary-horizontal' }],
+      activeArtboardIndex: 0,
+      tokens: nextTokens,
+    });
     setSelectedLayerIds([]);
     setViewMode('editor');
   };
@@ -1474,6 +1714,9 @@ export default function App() {
       updatedAt: now,
       brief: { ...brief },
       document: { ...activeDoc, title: resolvedName },
+      artboards,
+      activeArtboardIndex,
+      brandTokens,
     };
 
     const next = [newProject, ...projects];
@@ -1484,6 +1727,9 @@ export default function App() {
       activeProjectId: newProject.id,
       brief: newProject.brief,
       document: newProject.document,
+      artboards,
+      activeArtboardIndex,
+      brandTokens,
       updatedAt: now,
     });
     setAutoSaveState('saved');
@@ -1495,33 +1741,66 @@ export default function App() {
       businessName: 'New Brand',
       tagline: 'DESIGN STUDIO',
     };
+    const pal = resolvePalette(blankBrief.paletteId);
+    const pFont = resolveFont(blankBrief.primaryFontId);
+    const sFont = resolveFont(blankBrief.secondaryFontId);
+    const blankTokens = createDefaultBrandTokens(
+      { ...pal, background: '#FAF9F6' },
+      pFont,
+      sFont
+    );
     const blankDoc: LogoDocument = {
       id: nextLayerId('doc'),
       title: 'New Blank Logo',
+      artboardRole: 'primary-horizontal',
       width: 800,
       height: 600,
       backgroundColor: '#FAF9F6',
+      backgroundToken: 'background',
       transparentBackground: false,
       layers: [],
     };
     setActiveProjectId(null);
     setBrief(blankBrief);
-    setHistory({ past: [], present: blankDoc, future: [] });
-    setPages([blankDoc]);
-    setActivePageIndex(0);
+    setHistory({
+      past: [],
+      present: { artboards: [blankDoc], activeArtboardIndex: 0, tokens: blankTokens },
+      future: [],
+    });
     setSelectedLayerIds([]);
     setViewMode('editor');
   };
 
   const handleOpenProject = (project: LogoProject) => {
+    const pal = resolvePalette(project.brief.paletteId);
+    const pFont = resolveFont(project.brief.primaryFontId);
+    const sFont = resolveFont(project.brief.secondaryFontId);
+    const nextTokens =
+      project.brandTokens ??
+      createDefaultBrandTokens(
+        { ...pal, background: project.document.backgroundColor || pal.background },
+        pFont,
+        sFont
+      );
+    const rawList =
+      project.artboards && project.artboards.length > 0
+        ? project.artboards
+        : [project.document];
+    const nextArtboards = rawList.map((ab) => linkDocumentToBrandTokens(ab, nextTokens));
+    const nextIdx = Math.min(
+      Math.max(0, project.activeArtboardIndex ?? 0),
+      Math.max(0, nextArtboards.length - 1)
+    );
     setBrief(project.brief);
     setHistory({
       past: [],
-      present: project.document,
+      present: {
+        artboards: nextArtboards,
+        activeArtboardIndex: nextIdx,
+        tokens: nextTokens,
+      },
       future: [],
     });
-    setPages([project.document]);
-    setActivePageIndex(0);
     setActiveProjectId(project.id);
     setSelectedLayerIds([]);
     setViewMode('editor');
@@ -1546,7 +1825,12 @@ export default function App() {
     if (activeProjectId === id) {
       setHistory((prev) => ({
         ...prev,
-        present: { ...prev.present, title: trimmed },
+        present: {
+          ...prev.present,
+          artboards: prev.present.artboards.map((ab, idx) =>
+            idx === prev.present.activeArtboardIndex ? { ...ab, title: trimmed } : ab
+          ),
+        },
       }));
     }
   };
@@ -1563,6 +1847,9 @@ export default function App() {
       updatedAt: now,
       brief: { ...source.brief },
       document: cloneDocumentForProject(source.document, copyName),
+      artboards: source.artboards?.map((ab) => cloneDocumentForProject(ab, ab.title)),
+      activeArtboardIndex: source.activeArtboardIndex,
+      brandTokens: source.brandTokens,
     };
     const next = [copy, ...projects];
     setProjects(next);
@@ -1579,14 +1866,7 @@ export default function App() {
   };
 
   const handleExportProject = (project: LogoProject) => {
-    setBrief(project.brief);
-    setHistory({
-      past: [],
-      present: project.document,
-      future: [],
-    });
-    setActiveProjectId(project.id);
-    setSelectedLayerIds([]);
+    handleOpenProject(project);
     setExportOpen(true);
   };
 
@@ -1601,7 +1881,11 @@ export default function App() {
     setConcepts(nextConcepts);
     if (nextConcepts[0]) {
       setActiveProjectId(null);
-      commitDocument(nextConcepts[0].document);
+      const pal = resolvePalette(nextBrief.paletteId);
+      const pFont = resolveFont(nextBrief.primaryFontId);
+      const sFont = resolveFont(nextBrief.secondaryFontId);
+      const nextTokens = createDefaultBrandTokens(pal, pFont, sFont);
+      resetHistoryWithDoc(nextConcepts[0].document, nextTokens);
     }
     setSelectedLayerIds([]);
     setViewMode('concepts');
@@ -1611,9 +1895,15 @@ export default function App() {
     setActiveProjectId(null);
     setBrief(sampleBrief);
     setConcepts(generateTwelveLogoConcepts(sampleBrief));
-    commitDocument(sampleDoc);
-    setPages([sampleDoc]);
-    setActivePageIndex(0);
+    const pal = resolvePalette(sampleBrief.paletteId);
+    const pFont = resolveFont(sampleBrief.primaryFontId);
+    const sFont = resolveFont(sampleBrief.secondaryFontId);
+    const nextTokens = createDefaultBrandTokens(
+      { ...pal, background: sampleDoc.backgroundColor || pal.background },
+      pFont,
+      sFont
+    );
+    resetHistoryWithDoc(sampleDoc, nextTokens);
     setSelectedLayerIds([]);
     setViewMode('editor');
   };
@@ -1653,6 +1943,458 @@ export default function App() {
       }),
     });
   };
+
+  const activeGamutReport = useMemo(
+    () => auditDocumentPrintGamut(activeDoc),
+    [activeDoc]
+  );
+
+  const handleSnapToPrintGamut = (onlySourceHex?: string) => {
+    const nextArtboards = artboards.map((ab) =>
+      snapDocumentToPrintGamut(ab, onlySourceHex)
+    );
+    const nextColors = { ...brandTokens.colors };
+    (['primary', 'secondary', 'accent', 'text', 'background'] as BrandColorTokenId[]).forEach(
+      (tokenId) => {
+        const curHex = nextColors[tokenId].hex;
+        if (onlySourceHex && curHex.toUpperCase() !== onlySourceHex.toUpperCase()) return;
+        const proof = simulateCmykProofColor(curHex);
+        if (proof.isOutOfGamut) {
+          let safeHex = proof.proofHex;
+          for (let i = 0; i < 5; i++) {
+            const check = simulateCmykProofColor(safeHex);
+            if (!check.isOutOfGamut) break;
+            safeHex = check.proofHex;
+          }
+          nextColors[tokenId] = { ...nextColors[tokenId], hex: safeHex };
+        }
+      }
+    );
+    commitWorkspace({
+      ...workspace,
+      artboards: nextArtboards,
+      tokens: {
+        ...brandTokens,
+        colors: nextColors,
+      },
+    });
+    showEditorNotice(
+      onlySourceHex
+        ? `Snapped ${onlySourceHex} to printable CMYK gamut`
+        : 'Snapped all out-of-gamut colors to printable CMYK equivalents'
+    );
+  };
+
+  const studioCommands: StudioCommandItem[] = useMemo(() => {
+    const hasSel = selectedLayerIds.length > 0;
+    const singleSel = selectedLayerIds.length === 1
+      ? activeDoc.layers.find((l) => l.id === selectedLayerIds[0])
+      : undefined;
+    const singleText = singleSel?.type === 'text' ? singleSel : undefined;
+
+    return [
+      {
+        id: 'proof-cmyk',
+        title: 'Toggle Print Proof (CMYK)',
+        subtitle: 'Simulate CMYK ink dulling & flag out-of-gamut neon colors',
+        category: 'Print & Pre-Press',
+        active: printProofCmyk,
+        badge:
+          activeGamutReport.hasOutOfGamut
+            ? `${activeGamutReport.outOfGamutSwatches.length} Out-of-Gamut`
+            : undefined,
+        keywords: ['cmyk', 'print', 'proof', 'soft proof', 'gamut', 'ink', 'neon'],
+        run: () => {
+          setViewMode('editor');
+          setPrintProofCmyk((v) => !v);
+        },
+      },
+      {
+        id: 'snap-cmyk-gamut',
+        title: 'Snap Out-of-Gamut Colors to CMYK',
+        subtitle: activeGamutReport.hasOutOfGamut
+          ? `Convert ${activeGamutReport.outOfGamutSwatches.length} neon color(s) to printable CMYK`
+          : 'All colors already within coated CMYK gamut',
+        category: 'Print & Pre-Press',
+        disabled: !activeGamutReport.hasOutOfGamut,
+        keywords: ['snap', 'fix', 'cmyk', 'gamut', 'print', 'convert'],
+        run: () => handleSnapToPrintGamut(),
+      },
+      {
+        id: 'toggle-crop-marks',
+        title: 'Toggle Crop Marks & Registration',
+        subtitle: 'Show exterior corner trim marks & CMYK registration targets',
+        category: 'Print & Pre-Press',
+        active: showCropMarks,
+        keywords: ['crop', 'trim', 'marks', 'registration', 'prepress', 'print'],
+        run: () => {
+          setViewMode('editor');
+          setShowCropMarks((v) => !v);
+        },
+      },
+      {
+        id: 'toggle-bleed-guides',
+        title: 'Toggle 3mm Bleed Guides',
+        subtitle: 'Show 3mm (12px) print bleed frame',
+        category: 'Print & Pre-Press',
+        active: showBleed,
+        keywords: ['bleed', '3mm', 'trim', 'print', 'prepress'],
+        run: () => {
+          setViewMode('editor');
+          setShowBleed((v) => !v);
+        },
+      },
+      {
+        id: 'toggle-clear-space',
+        title: 'Toggle 1x Clear-Space Margin Box',
+        subtitle: 'Display dynamic 1x brand exclusion zone around logo artwork',
+        category: 'Print & Pre-Press',
+        active: showClearSpace,
+        keywords: ['clear', 'space', '1x', 'margin', 'exclusion', 'guideline'],
+        run: () => {
+          setViewMode('editor');
+          setShowClearSpace((v) => !v);
+        },
+      },
+      {
+        id: 'toggle-safe-margin',
+        title: 'Toggle 8% Safe Zone Margin',
+        subtitle: 'Check layer clipping near artboard edges',
+        category: 'Print & Pre-Press',
+        active: showSafeZone,
+        keywords: ['safe', 'zone', 'margin', 'inset', 'clipping'],
+        run: () => {
+          setViewMode('editor');
+          setShowSafeZone((v) => !v);
+        },
+      },
+      {
+        id: 'align-center-h',
+        title: 'Align Center Horizontally',
+        subtitle: hasSel ? 'Center selected layer(s) horizontally' : 'Select a layer first',
+        category: 'Align & Transform',
+        disabled: !hasSel,
+        keywords: ['align', 'center', 'horizontal', 'middle'],
+        run: () => handleAlignSelectedLayers('center-h'),
+      },
+      {
+        id: 'align-center-v',
+        title: 'Align Center Vertically',
+        subtitle: hasSel ? 'Center selected layer(s) vertically' : 'Select a layer first',
+        category: 'Align & Transform',
+        disabled: !hasSel,
+        keywords: ['align', 'center', 'vertical', 'middle'],
+        run: () => handleAlignSelectedLayers('center-v'),
+      },
+      {
+        id: 'align-left',
+        title: 'Align Left',
+        category: 'Align & Transform',
+        disabled: !hasSel,
+        keywords: ['align', 'left'],
+        run: () => handleAlignSelectedLayers('left'),
+      },
+      {
+        id: 'align-right',
+        title: 'Align Right',
+        category: 'Align & Transform',
+        disabled: !hasSel,
+        keywords: ['align', 'right'],
+        run: () => handleAlignSelectedLayers('right'),
+      },
+      {
+        id: 'align-top',
+        title: 'Align Top',
+        category: 'Align & Transform',
+        disabled: !hasSel,
+        keywords: ['align', 'top'],
+        run: () => handleAlignSelectedLayers('top'),
+      },
+      {
+        id: 'align-bottom',
+        title: 'Align Bottom',
+        category: 'Align & Transform',
+        disabled: !hasSel,
+        keywords: ['align', 'bottom'],
+        run: () => handleAlignSelectedLayers('bottom'),
+      },
+      {
+        id: 'duplicate-selected',
+        title: 'Duplicate Selected Layers',
+        category: 'Layers & Vector',
+        shortcut: 'Ctrl+D',
+        disabled: !hasSel,
+        keywords: ['duplicate', 'copy', 'clone', 'layer'],
+        run: () => handleDuplicateSelected(),
+      },
+      {
+        id: 'delete-selected',
+        title: 'Delete Selected Layers',
+        category: 'Layers & Vector',
+        shortcut: 'Del',
+        disabled: !hasSel,
+        keywords: ['delete', 'remove', 'trash', 'layer'],
+        run: () => handleDeleteSelected(),
+      },
+      {
+        id: 'group-selected',
+        title: 'Group Selected Layers',
+        category: 'Layers & Vector',
+        shortcut: 'Ctrl+G',
+        disabled: selectedLayerIds.length < 2,
+        keywords: ['group', 'combine', 'layers'],
+        run: () => handleGroupSelected(),
+      },
+      {
+        id: 'ungroup-selected',
+        title: 'Ungroup Selected Group',
+        category: 'Layers & Vector',
+        shortcut: 'Ctrl+Shift+G',
+        disabled: !hasSel,
+        keywords: ['ungroup', 'split', 'layers'],
+        run: () => handleUngroupSelected(),
+      },
+      {
+        id: 'knockout-cutout',
+        title: 'Punch Knockout / Cutout Mask',
+        category: 'Layers & Vector',
+        disabled: !hasSel,
+        keywords: ['knockout', 'cutout', 'mask', 'punch', 'hole'],
+        run: () => handleKnockoutSelected(),
+      },
+      {
+        id: 'convert-text-outlines',
+        title: 'Convert Text to Vector Outlines',
+        category: 'Layers & Vector',
+        disabled: !singleText,
+        keywords: ['convert', 'outlines', 'text', 'path', 'vectorize'],
+        run: () => {
+          if (singleText) void handleConvertTextToPath(singleText);
+        },
+      },
+      {
+        id: 'toggle-pen-tool',
+        title: 'Toggle Bezier Pen Tool',
+        category: 'Layers & Vector',
+        active: canvasToolMode === 'pen',
+        keywords: ['pen', 'bezier', 'draw', 'curve', 'path'],
+        run: () => {
+          setViewMode('editor');
+          handleTogglePenTool();
+        },
+      },
+      {
+        id: 'toggle-per-letter',
+        title: 'Toggle Per-Letter Type Edit Mode',
+        category: 'Layers & Vector',
+        active: canvasToolMode === 'per-letter',
+        keywords: ['per-letter', 'kerning', 'glyph', 'typography'],
+        run: () => {
+          setViewMode('editor');
+          handleTogglePerLetterMode();
+        },
+      },
+      {
+        id: 'magic-recolor',
+        title: 'Magic Recolor Palette',
+        category: 'Layers & Vector',
+        keywords: ['magic', 'recolor', 'palette', 'colors'],
+        run: () => handleMagicRecolor(),
+      },
+      {
+        id: 'fit-active-artboard',
+        title: 'Fit Active Artboard in View',
+        category: 'Canvas & Artboards',
+        keywords: ['fit', 'zoom', 'center', 'artboard'],
+        run: () => {
+          setViewMode('editor');
+          viewportCommandRef.current?.fitActive();
+        },
+      },
+      {
+        id: 'fit-all-artboards',
+        title: 'Fit All Lockup Artboards in View',
+        category: 'Canvas & Artboards',
+        keywords: ['fit all', 'zoom', 'artboards', 'lockups', 'overview'],
+        run: () => {
+          setViewMode('editor');
+          viewportCommandRef.current?.fitAll();
+        },
+      },
+      {
+        id: 'arrange-artboards',
+        title: 'Arrange Artboards Side-by-Side',
+        category: 'Canvas & Artboards',
+        disabled: artboards.length <= 1,
+        keywords: ['arrange', 'align', 'artboards', 'tidy'],
+        run: () => {
+          setViewMode('editor');
+          handleArrangeArtboards();
+        },
+      },
+      {
+        id: 'add-stacked-badge',
+        title: 'Add Stacked Badge Artboard (800×800)',
+        category: 'Canvas & Artboards',
+        keywords: ['add', 'artboard', 'stacked', 'badge', 'lockup'],
+        run: () => {
+          setViewMode('editor');
+          handleAddResponsiveArtboard('stacked-badge');
+        },
+      },
+      {
+        id: 'add-app-icon',
+        title: 'Add App Icon / Favicon Artboard (512×512)',
+        category: 'Canvas & Artboards',
+        keywords: ['add', 'artboard', 'app icon', 'favicon', 'square'],
+        run: () => {
+          setViewMode('editor');
+          handleAddResponsiveArtboard('app-icon');
+        },
+      },
+      {
+        id: 'add-social-banner',
+        title: 'Add Social Banner Artboard (1200×400)',
+        category: 'Canvas & Artboards',
+        keywords: ['add', 'artboard', 'social', 'banner', 'cover'],
+        run: () => {
+          setViewMode('editor');
+          handleAddResponsiveArtboard('social-banner');
+        },
+      },
+      {
+        id: 'cycle-grid',
+        title: 'Cycle Canvas Grid (Square / 3rds / Golden φ / Off)',
+        category: 'Canvas & Artboards',
+        keywords: ['grid', 'golden', 'thirds', 'square', 'guides'],
+        run: () => {
+          setViewMode('editor');
+          viewportCommandRef.current?.cycleGrid();
+        },
+      },
+      {
+        id: 'cycle-rulers',
+        title: 'Cycle Workspace Rulers (px / mm / Off)',
+        category: 'Canvas & Artboards',
+        keywords: ['ruler', 'mm', 'px', 'measure'],
+        run: () => {
+          setViewMode('editor');
+          viewportCommandRef.current?.cycleRuler();
+        },
+      },
+      {
+        id: 'toggle-pan-tool',
+        title: 'Toggle Hand Pan Tool (Spacebar + Drag)',
+        category: 'Canvas & Artboards',
+        keywords: ['hand', 'pan', 'drag', 'move', 'canvas'],
+        run: () => {
+          setViewMode('editor');
+          viewportCommandRef.current?.togglePan();
+        },
+      },
+      {
+        id: 'open-export',
+        title: 'Open Export Studio (SVG / PNG / PDF / Favicon)',
+        category: 'Export & Studio',
+        keywords: ['export', 'download', 'svg', 'png', 'pdf', 'favicon', 'zip'],
+        run: () => setExportOpen(true),
+      },
+      {
+        id: 'open-templates',
+        title: 'Browse Pro Logo Templates',
+        category: 'Export & Studio',
+        keywords: ['templates', 'gallery', 'presets'],
+        run: () => setTemplateGalleryOpen(true),
+      },
+      {
+        id: 'open-wizard',
+        title: 'Open 6-Concept Logo Wizard',
+        category: 'Export & Studio',
+        keywords: ['wizard', 'generate', 'concepts', 'ai'],
+        run: () => setWizardOpen(true),
+      },
+      {
+        id: 'open-variations',
+        title: 'Generate 4 Logo Variations',
+        category: 'Export & Studio',
+        keywords: ['variations', 'variants', 'dark', 'monochrome'],
+        run: () => handleOpenVariations(),
+      },
+      {
+        id: 'switch-mockups',
+        title: 'View Brand Mockups',
+        category: 'Export & Studio',
+        keywords: ['mockups', 'tshirt', 'signage', 'bottle', 'preview'],
+        run: () => setViewMode('mockups'),
+      },
+      {
+        id: 'switch-brandkit',
+        title: 'Open Brand Kit & Style Sheet',
+        category: 'Export & Studio',
+        keywords: ['brand kit', 'colors', 'typography', 'guidelines'],
+        run: () => setViewMode('brandkit'),
+      },
+      {
+        id: 'switch-cards',
+        title: 'Open Visiting Card Atelier',
+        category: 'Export & Studio',
+        keywords: ['visiting card', 'business card', 'print'],
+        run: () => {
+          setIncomingLogoNonce((n) => n + 1);
+          setViewMode('cards');
+        },
+      },
+      {
+        id: 'share-client',
+        title: 'Share Read-Only Client Preview',
+        category: 'Export & Studio',
+        keywords: ['share', 'client', 'link', 'presentation'],
+        run: () => setShareOpen(true),
+      },
+      {
+        id: 'toggle-theme',
+        title:
+          studioTheme === 'light'
+            ? 'Switch to Dark Studio Theme'
+            : 'Switch to Light Studio Theme',
+        category: 'Export & Studio',
+        keywords: ['theme', 'dark', 'light', 'mode'],
+        run: () => setStudioTheme((t) => (t === 'light' ? 'dark' : 'light')),
+      },
+      {
+        id: 'undo-action',
+        title: 'Undo Last Action',
+        category: 'Export & Studio',
+        shortcut: 'Ctrl+Z',
+        disabled: history.past.length === 0,
+        keywords: ['undo', 'revert', 'history'],
+        run: () => handleUndo(),
+      },
+      {
+        id: 'redo-action',
+        title: 'Redo Action',
+        category: 'Export & Studio',
+        shortcut: 'Ctrl+Shift+Z',
+        disabled: history.future.length === 0,
+        keywords: ['redo', 'history'],
+        run: () => handleRedo(),
+      },
+    ];
+  }, [
+    selectedLayerIds,
+    activeDoc.layers,
+    printProofCmyk,
+    showCropMarks,
+    showBleed,
+    showClearSpace,
+    showSafeZone,
+    activeGamutReport,
+    canvasToolMode,
+    artboards.length,
+    studioTheme,
+    history.past.length,
+    history.future.length,
+  ]);
 
   return (
     <StudioLogoProvider
@@ -1822,6 +2564,20 @@ export default function App() {
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
+                data-testid="command-palette-trigger"
+                onClick={() => setCommandPaletteOpen(true)}
+                title="Quick Command Palette (Ctrl+K / Cmd+K)"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400/70 dark:hover:border-indigo-500/60 active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Command className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+                <span className="hidden 2xl:inline">Commands</span>
+                <kbd className="rounded border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-1 py-0.5 font-mono-num text-[9.5px] font-bold text-slate-500 dark:text-slate-400">
+                  ⌘K
+                </kbd>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setTemplateGalleryOpen(true)}
                 title="Browse 49+ Categorized Pro Templates"
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-400/70 dark:hover:border-indigo-500/60 dark:hover:shadow-[0_0_12px_rgba(99,102,241,0.2)] active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer"
@@ -1928,6 +2684,11 @@ export default function App() {
             activeStyle={brief.style}
             selectedLayerIds={selectedLayerIds}
             uploadedSvgs={uploadedSvgs}
+            artboards={artboards}
+            brandTokens={brandTokens}
+            onUpdateColorToken={handleUpdateColorToken}
+            onUpdateFontToken={handleUpdateFontToken}
+            onSyncAllTokens={handleSyncAllTokens}
             onSelectLayers={setSelectedLayerIds}
             onAddIcon={handleAddIcon}
             onAddShape={handleAddShape}
@@ -1982,9 +2743,14 @@ export default function App() {
               onApplyFontPairing={handleApplyFontPairing}
               onReorderLayer={handleReorderLayer}
               onConvertTextToPath={handleConvertTextToPath}
-              onUpdateDocBackground={(backgroundColor, transparentBackground) => {
+              onUpdateDocBackground={(backgroundColor, transparentBackground, tokenId) => {
                 if (activeDoc.backgroundLocked) return;
-                commitDocument({ ...activeDoc, backgroundColor, transparentBackground });
+                commitDocument({
+                  ...activeDoc,
+                  backgroundColor,
+                  transparentBackground,
+                  backgroundToken: tokenId === null ? undefined : tokenId ?? activeDoc.backgroundToken,
+                });
               }}
               onResizeArtboard={handleResizeArtboard}
               canUndo={history.past.length > 0}
@@ -2008,14 +2774,21 @@ export default function App() {
               onToggleBackgroundLock={handleToggleBackgroundLock}
               activeProjectName={activeProject?.name ?? null}
               autoSaveState={autoSaveState}
-              pages={pages.map((p, idx) => ({
+              artboards={artboards}
+              activeArtboardIndex={activeArtboardIndex}
+              brandTokens={brandTokens}
+              onSwitchArtboard={handleSwitchArtboard}
+              onAddResponsiveArtboard={handleAddResponsiveArtboard}
+              onRemoveArtboard={handleRemoveArtboard}
+              onArrangeArtboards={handleArrangeArtboards}
+              pages={artboards.map((p, idx) => ({
                 id: p.id,
-                title: idx === activePageIndex ? activeDoc.title : p.title,
+                title: idx === activeArtboardIndex ? activeDoc.title : p.title,
               }))}
-              activePageIndex={activePageIndex}
-              onSwitchPage={handleSwitchPage}
-              onAddPage={handleAddPage}
-              onRemovePage={handleRemovePage}
+              activePageIndex={activeArtboardIndex}
+              onSwitchPage={(idx) => handleSwitchArtboard(idx)}
+              onAddPage={() => handleAddResponsiveArtboard('custom')}
+              onRemovePage={handleRemoveArtboard}
               onOpenMockups={() => setViewMode('mockups')}
               canvasToolMode={canvasToolMode}
               onChangeToolMode={(mode) => {
@@ -2026,6 +2799,18 @@ export default function App() {
               onTogglePenTool={handleTogglePenTool}
               onStartPenForText={handleStartPenForText}
               onCreateLayer={handleCreateLayerFromEditor}
+              printProofCmyk={printProofCmyk}
+              onTogglePrintProof={() => setPrintProofCmyk((v) => !v)}
+              showCropMarks={showCropMarks}
+              onToggleCropMarks={() => setShowCropMarks((v) => !v)}
+              showBleed={showBleed}
+              onToggleBleed={() => setShowBleed((v) => !v)}
+              showClearSpace={showClearSpace}
+              onToggleClearSpace={() => setShowClearSpace((v) => !v)}
+              showSafeZone={showSafeZone}
+              onToggleSafeZone={() => setShowSafeZone((v) => !v)}
+              onSnapToPrintGamut={handleSnapToPrintGamut}
+              viewportCommandRef={viewportCommandRef}
             />
           </div>
 
@@ -2186,6 +2971,12 @@ export default function App() {
       <UpdateLogModal
         isOpen={updateLogOpen}
         onClose={() => setUpdateLogOpen(false)}
+      />
+
+      <CommandPaletteModal
+        isOpen={commandPaletteOpen}
+        commands={studioCommands}
+        onClose={() => setCommandPaletteOpen(false)}
       />
     </StudioLogoProvider>
   );

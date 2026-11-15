@@ -24,6 +24,7 @@ import {
   Grid3x3,
   Italic,
   Layers,
+  Link2,
   Lock,
   Minus,
   MoveHorizontal,
@@ -39,12 +40,15 @@ import {
   Spline,
   Trash2,
   Type,
+  Unlink,
   Unlock,
   Wand2,
 } from 'lucide-react';
 import { FONT_OPTIONS, FONT_PAIRINGS, VECTOR_ICONS } from '../data/logoLibrary';
 import {
   BlendMode,
+  BrandColorTokenId,
+  BrandTokens,
   ClipMaskShapeKind,
   ColorPalette,
   FontOption,
@@ -57,6 +61,7 @@ import {
   TextLayer,
   TextPathAttachment,
 } from '../types/logo';
+import { BRAND_COLOR_TOKEN_ORDER, BRAND_FONT_TOKEN_ORDER } from '../utils/brandTokens';
 import { extractLayerPathInArtboardSpace } from '../utils/pathGeometry';
 import { BooleanOpKind, isCombinableVectorLayer } from '../utils/booleanOps';
 import { BLEND_MODE_OPTIONS } from '../utils/surfaceTextures';
@@ -117,6 +122,7 @@ const CLIP_MASK_SHAPES: Array<{ kind: ClipMaskShapeKind; label: string }> = [
 interface FloatingContextToolbarProps {
   doc: LogoDocument;
   activePalette: ColorPalette;
+  brandTokens?: BrandTokens;
   selectedLayers: LogoLayer[];
   gridMode?: 'off' | 'square' | 'thirds' | 'golden';
   onCycleGridMode?: () => void;
@@ -130,7 +136,11 @@ interface FloatingContextToolbarProps {
   onApplyFontPairing: (pairing: FontPairing) => void;
   onDuplicateSelected: () => void;
   onDeleteSelected: () => void;
-  onUpdateDocBackground: (bg: string, transparent: boolean) => void;
+  onUpdateDocBackground: (
+    bg: string,
+    transparent: boolean,
+    tokenId?: BrandColorTokenId | null
+  ) => void;
   onResizeArtboard: (width: number, height: number) => void;
   onReorderLayer: (id: string, dir: 'up' | 'down') => void;
   onConvertTextToPath: (layer: TextLayer) => Promise<void>;
@@ -180,6 +190,7 @@ function toInputColorHex(color?: string, fallback = '#141413'): string {
 export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
   doc,
   activePalette,
+  brandTokens,
   selectedLayers,
   gridMode = 'square',
   onCycleGridMode,
@@ -379,33 +390,83 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
 
               {!doc.transparentBackground && (
                 <div
-                  className={`flex flex-wrap items-center gap-1.5 ${
+                  className={`space-y-2.5 ${
                     doc.backgroundLocked ? 'opacity-45 pointer-events-none' : ''
                   }`}
                 >
-                  {quickSwatches.map((hex) => (
-                    <button
-                      key={hex}
-                      type="button"
+                  {brandTokens && (
+                    <div className="rounded-lg border border-indigo-200/80 dark:border-indigo-500/30 bg-indigo-50/50 dark:bg-indigo-950/20 p-2 space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                        <span className="inline-flex items-center gap-1">
+                          <Link2 className="h-3 w-3" />
+                          {doc.backgroundToken
+                            ? `Linked: ${brandTokens.colors[doc.backgroundToken].label}`
+                            : 'Global Brand Tokens'}
+                        </span>
+                        {doc.backgroundToken && (
+                          <button
+                            type="button"
+                            disabled={Boolean(doc.backgroundLocked)}
+                            onClick={() =>
+                              onUpdateDocBackground(doc.backgroundColor, false, null)
+                            }
+                            className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9.5px] text-slate-600 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-white/10 cursor-pointer"
+                          >
+                            <Unlink className="h-2.5 w-2.5" />
+                            Unlink
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {BRAND_COLOR_TOKEN_ORDER.map((tid) => {
+                          const tok = brandTokens.colors[tid];
+                          const isLinked = doc.backgroundToken === tid;
+                          return (
+                            <button
+                              key={tid}
+                              type="button"
+                              disabled={Boolean(doc.backgroundLocked)}
+                              onClick={() => onUpdateDocBackground(tok.hex, false, tid)}
+                              title={`Link background to ${tok.label} (${tok.hex})`}
+                              className={`h-6 flex-1 rounded-md border cursor-pointer active:scale-95 transition-transform ${
+                                isLinked
+                                  ? 'ring-2 ring-indigo-600 dark:ring-indigo-400 ring-offset-1 border-black/30'
+                                  : 'border-black/15 dark:border-white/20 hover:scale-105'
+                              }`}
+                              style={{ backgroundColor: tok.hex }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {quickSwatches.map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        disabled={Boolean(doc.backgroundLocked)}
+                        onClick={() => onUpdateDocBackground(hex, false, null)}
+                        className={`h-7 w-7 rounded-lg border cursor-pointer active:scale-95 transition-transform ${
+                          !doc.backgroundToken &&
+                          doc.backgroundColor.toLowerCase() === hex.toLowerCase()
+                            ? 'ring-2 ring-indigo-500 ring-offset-1 border-black/30'
+                            : 'border-black/15 dark:border-white/15'
+                        }`}
+                        style={{ backgroundColor: hex }}
+                        title={hex}
+                      />
+                    ))}
+                    <input
+                      type="color"
                       disabled={Boolean(doc.backgroundLocked)}
-                      onClick={() => onUpdateDocBackground(hex, false)}
-                      className={`h-7 w-7 rounded-lg border cursor-pointer active:scale-95 transition-transform ${
-                        doc.backgroundColor.toLowerCase() === hex.toLowerCase()
-                          ? 'ring-2 ring-indigo-500 ring-offset-1 border-black/30'
-                          : 'border-black/15 dark:border-white/15'
-                      }`}
-                      style={{ backgroundColor: hex }}
-                      title={hex}
+                      value={doc.backgroundColor}
+                      onChange={(e) => onUpdateDocBackground(e.target.value, false, null)}
+                      aria-label="Custom background hex"
+                      className="h-7 w-8 cursor-pointer rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-transparent p-0.5"
                     />
-                  ))}
-                  <input
-                    type="color"
-                    disabled={Boolean(doc.backgroundLocked)}
-                    value={doc.backgroundColor}
-                    onChange={(e) => onUpdateDocBackground(e.target.value, false)}
-                    aria-label="Custom background hex"
-                    className="h-7 w-8 cursor-pointer rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-transparent p-0.5"
-                  />
+                  </div>
                 </div>
               )}
             </div>
@@ -911,6 +972,7 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
       fontId: font.id,
       fontFamily: font.cssFamily,
       fontWeight: nextWeight,
+      fontToken: undefined,
     });
     setOpenPopover(null);
   };
@@ -925,7 +987,7 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
       setCustomFonts((prev) =>
         prev.some((p) => p.id === opt.id) ? prev : [opt, ...prev]
       );
-      update({ fontId: opt.id, fontFamily: opt.cssFamily });
+      update({ fontId: opt.id, fontFamily: opt.cssFamily, fontToken: undefined });
       setOpenPopover(null);
     } finally {
       setLoadingCustomFont(false);
@@ -1088,6 +1150,65 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
                     {showPairingsInFont ? 'All Fonts' : 'Font Pairings'}
                   </button>
                 </div>
+
+                {brandTokens && (
+                  <div className="rounded-lg border border-indigo-200/80 dark:border-indigo-500/30 bg-indigo-50/50 dark:bg-indigo-950/20 p-2 space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                      <span className="inline-flex items-center gap-1">
+                        <Link2 className="h-3 w-3" />
+                        {singleLayer.fontToken
+                          ? `Linked: ${brandTokens.fonts[singleLayer.fontToken].label}`
+                          : 'Global Font Tokens'}
+                      </span>
+                      {singleLayer.fontToken && (
+                        <button
+                          type="button"
+                          onClick={() => update({ fontToken: undefined })}
+                          className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9.5px] text-slate-600 dark:text-slate-300 hover:bg-white/80 dark:hover:bg-white/10 cursor-pointer"
+                        >
+                          <Unlink className="h-2.5 w-2.5" />
+                          Unlink
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {BRAND_FONT_TOKEN_ORDER.map((fid) => {
+                        const tok = brandTokens.fonts[fid];
+                        const isLinked = singleLayer.fontToken === fid;
+                        const opt = allFonts.find((f) => f.id === tok.fontId);
+                        return (
+                          <button
+                            key={fid}
+                            type="button"
+                            onClick={() => {
+                              if (opt) void ensureFontOptionLoaded(opt);
+                              update({
+                                fontId: tok.fontId,
+                                fontFamily: tok.fontFamily,
+                                fontToken: fid,
+                              });
+                            }}
+                            className={`rounded-lg border px-2 py-1 text-left transition-colors cursor-pointer ${
+                              isLinked
+                                ? 'border-indigo-600 bg-indigo-600 text-white'
+                                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] hover:border-indigo-400'
+                            }`}
+                          >
+                            <p className="text-[9.5px] opacity-80">
+                              {fid === 'display' ? 'Display Token' : 'Tagline Token'}
+                            </p>
+                            <p
+                              className="truncate text-[11px] font-bold"
+                              style={{ fontFamily: tok.fontFamily }}
+                            >
+                              {opt?.name ?? tok.fontId}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {!showPairingsInFont ? (
                   <>
@@ -1318,6 +1439,7 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
               activePalette={activePalette}
               quickSwatches={quickSwatches}
               isText={isText}
+              brandTokens={brandTokens}
               onUpdate={update}
             />
 
@@ -1330,7 +1452,9 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
                     <input
                       type="color"
                       value={toInputColorHex(singleLayer.accentFill, activePalette.accent)}
-                      onChange={(e) => update({ accentFill: e.target.value })}
+                      onChange={(e) =>
+                        update({ accentFill: e.target.value, accentFillToken: undefined })
+                      }
                       className="h-4 w-5 cursor-pointer border-0 bg-transparent p-0"
                     />
                   </label>
@@ -1339,7 +1463,9 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
                     <input
                       type="color"
                       value={toInputColorHex(singleLayer.secondaryFill, activePalette.secondary)}
-                      onChange={(e) => update({ secondaryFill: e.target.value })}
+                      onChange={(e) =>
+                        update({ secondaryFill: e.target.value, secondaryFillToken: undefined })
+                      }
                       className="h-4 w-5 cursor-pointer border-0 bg-transparent p-0"
                     />
                   </label>

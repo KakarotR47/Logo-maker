@@ -3,12 +3,16 @@ import {
   AlertTriangle,
   BookmarkCheck,
   CheckCircle2,
+  ChevronDown,
   Eye,
   FolderPlus,
   Grid3x3,
+  Hand,
+  LayoutGrid,
   Maximize2,
   PenTool,
   Plus,
+  Printer,
   RotateCcw,
   Ruler,
   Scan,
@@ -20,6 +24,9 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import {
+  ArtboardPresetKind,
+  BrandColorTokenId,
+  BrandTokens,
   ColorPalette,
   FontPairing,
   LogoDocument,
@@ -28,6 +35,12 @@ import {
   SurfaceTextureConfig,
   TextLayer,
 } from '../types/logo';
+import {
+  ARTBOARD_GAP_PX,
+  ARTBOARD_PRESETS,
+  computeWorldBounds,
+  layoutArtboardsSideBySide,
+} from '../utils/multiArtboard';
 import {
   analyzeDocumentContrast,
   checkSafeZoneViolations,
@@ -46,8 +59,23 @@ import {
 } from '../utils/pathGeometry';
 import { LogoSceneLayers } from './CanvasLayerRenderer';
 import { FloatingContextToolbar } from './FloatingContextToolbar';
+import { PrintPrepressPopover } from './PrintPrepressPopover';
+import {
+  applyCmykSoftProofToDocument,
+  auditDocumentPrintGamut,
+  computeClearSpaceMetrics,
+} from '../utils/printPrepress';
 
 export type CanvasToolMode = 'select' | 'pen' | 'nodes' | 'per-letter';
+
+export interface ViewportCommandHandle {
+  fitActive: () => void;
+  fitAll: () => void;
+  cycleGrid: () => void;
+  cycleRuler: () => void;
+  toggleSnap: () => void;
+  togglePan: () => void;
+}
 
 interface SnapGuide {
   axis: 'x' | 'y';
@@ -96,7 +124,11 @@ interface LogoCanvasEditorProps {
   onApplyFontPairing: (pairing: FontPairing) => void;
   onReorderLayer: (id: string, dir: 'up' | 'down') => void;
   onConvertTextToPath: (layer: TextLayer) => Promise<void>;
-  onUpdateDocBackground: (bg: string, transparent: boolean) => void;
+  onUpdateDocBackground: (
+    bg: string,
+    transparent: boolean,
+    tokenId?: BrandColorTokenId | null
+  ) => void;
   onResizeArtboard: (width: number, height: number) => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -116,6 +148,13 @@ interface LogoCanvasEditorProps {
   onToggleBackgroundLock?: () => void;
   activeProjectName?: string | null;
   autoSaveState?: 'saved' | 'saving';
+  artboards?: LogoDocument[];
+  activeArtboardIndex?: number;
+  brandTokens?: BrandTokens;
+  onSwitchArtboard?: (index: number, selectLayerIds?: string[]) => void;
+  onAddResponsiveArtboard?: (preset: ArtboardPresetKind) => void;
+  onRemoveArtboard?: (index: number) => void;
+  onArrangeArtboards?: () => void;
   pages: Array<{ id: string; title: string }>;
   activePageIndex: number;
   onSwitchPage: (index: number) => void;
@@ -128,6 +167,18 @@ interface LogoCanvasEditorProps {
   onTogglePenTool?: () => void;
   onStartPenForText?: (textLayerId: string) => void;
   onCreateLayer?: (layer: LogoLayer, attachToTextId?: string | null) => void;
+  printProofCmyk?: boolean;
+  onTogglePrintProof?: () => void;
+  showCropMarks?: boolean;
+  onToggleCropMarks?: () => void;
+  showBleed?: boolean;
+  onToggleBleed?: () => void;
+  showClearSpace?: boolean;
+  onToggleClearSpace?: () => void;
+  showSafeZone?: boolean;
+  onToggleSafeZone?: () => void;
+  onSnapToPrintGamut?: (onlySourceHex?: string) => void;
+  viewportCommandRef?: React.MutableRefObject<ViewportCommandHandle | null>;
 }
 
 export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
@@ -169,6 +220,13 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onToggleBackgroundLock,
   activeProjectName,
   autoSaveState = 'saved',
+  artboards,
+  activeArtboardIndex,
+  brandTokens,
+  onSwitchArtboard,
+  onAddResponsiveArtboard,
+  onRemoveArtboard,
+  onArrangeArtboards,
   pages,
   activePageIndex,
   onSwitchPage,
@@ -181,13 +239,61 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onTogglePenTool,
   onStartPenForText,
   onCreateLayer,
+  printProofCmyk: printProofCmykProp,
+  onTogglePrintProof,
+  showCropMarks: showCropMarksProp,
+  onToggleCropMarks,
+  showBleed: showBleedProp,
+  onToggleBleed,
+  showClearSpace: showClearSpaceProp,
+  onToggleClearSpace,
+  showSafeZone: showSafeZoneProp,
+  onToggleSafeZone,
+  onSnapToPrintGamut,
+  viewportCommandRef,
 }) => {
   const [zoom, setZoom] = useState<number>(1);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 80, y: 110 });
+  const [isSpacePressed, setIsSpacePressed] = useState<boolean>(false);
+  const [handMode, setHandMode] = useState<boolean>(false);
+  const [isPanning, setIsPanning] = useState<boolean>(false);
+  const [addArtboardMenuOpen, setAddArtboardMenuOpen] = useState<boolean>(false);
+  const [prepressMenuOpen, setPrepressMenuOpen] = useState<boolean>(false);
   const [gridMode, setGridMode] = useState<'off' | 'square' | 'thirds' | 'golden'>('square');
   const [rulerUnit, setRulerUnit] = useState<'off' | 'px' | 'mm'>('px');
   const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
-  const [showSafeZone, setShowSafeZone] = useState<boolean>(false);
-  const [showBleed, setShowBleed] = useState<boolean>(false);
+  const [localSafeZone, setLocalSafeZone] = useState<boolean>(false);
+  const [localBleed, setLocalBleed] = useState<boolean>(false);
+  const [localCropMarks, setLocalCropMarks] = useState<boolean>(false);
+  const [localClearSpace, setLocalClearSpace] = useState<boolean>(false);
+  const [localPrintProof, setLocalPrintProof] = useState<boolean>(false);
+
+  const printProofCmyk = printProofCmykProp ?? localPrintProof;
+  const showCropMarks = showCropMarksProp ?? localCropMarks;
+  const showBleed = showBleedProp ?? localBleed;
+  const showClearSpace = showClearSpaceProp ?? localClearSpace;
+  const showSafeZone = showSafeZoneProp ?? localSafeZone;
+
+  const handleTogglePrintProof = () => {
+    if (onTogglePrintProof) onTogglePrintProof();
+    else setLocalPrintProof((v) => !v);
+  };
+  const handleToggleCropMarks = () => {
+    if (onToggleCropMarks) onToggleCropMarks();
+    else setLocalCropMarks((v) => !v);
+  };
+  const handleToggleBleed = () => {
+    if (onToggleBleed) onToggleBleed();
+    else setLocalBleed((v) => !v);
+  };
+  const handleToggleClearSpace = () => {
+    if (onToggleClearSpace) onToggleClearSpace();
+    else setLocalClearSpace((v) => !v);
+  };
+  const handleToggleSafeZone = () => {
+    if (onToggleSafeZone) onToggleSafeZone();
+    else setLocalSafeZone((v) => !v);
+  };
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [marquee, setMarquee] = useState<MarqueeBox | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -257,6 +363,36 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   );
   const lastMarqueeIdsRef = useRef<string>('');
   const userAdjustedZoomRef = useRef<boolean>(false);
+  const addArtboardMenuRef = useRef<HTMLDivElement>(null);
+  const addArtboardButtonRef = useRef<HTMLButtonElement>(null);
+  const prepressMenuRef = useRef<HTMLDivElement>(null);
+  const prepressButtonRef = useRef<HTMLButtonElement>(null);
+  const panCameraRef = useRef({ zoom, pan });
+  panCameraRef.current = { zoom, pan };
+  const panDragRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    startPanX: number;
+    startPanY: number;
+  } | null>(null);
+
+  const workspaceArtboards = useMemo(
+    () => (artboards && artboards.length > 0 ? artboards : [doc]),
+    [artboards, doc]
+  );
+  const resolvedActiveIndex = Math.min(
+    activeArtboardIndex ?? activePageIndex ?? 0,
+    Math.max(0, workspaceArtboards.length - 1)
+  );
+  const positionedArtboards = useMemo(
+    () => layoutArtboardsSideBySide(workspaceArtboards, ARTBOARD_GAP_PX),
+    [workspaceArtboards]
+  );
+  const worldBounds = useMemo(
+    () => computeWorldBounds(positionedArtboards),
+    [positionedArtboards]
+  );
+  const prevArtboardCountRef = useRef<number>(workspaceArtboards.length);
 
   // Keep latest reactive values in a ref so window listeners bind once without thrashing
   const latestRef = useRef({
@@ -381,29 +517,97 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     [doc, showSafeZone]
   );
 
-  const computeFitZoom = useCallback(
-    (containerW: number, containerH?: number) => {
-      const horizontalPad = containerW < 640 ? 32 : 84;
-      const verticalPad = containerH && containerH < 600 ? 120 : 156;
-      const availableW = Math.max(220, containerW - horizontalPad);
-      const fitW = availableW / Math.max(1, doc.width);
-      const fitH = containerH
-        ? Math.max(200, containerH - verticalPad) / Math.max(1, doc.height)
-        : 1;
-      return Math.min(1, Math.max(0.25, +Math.min(fitW, fitH).toFixed(2)));
-    },
-    [doc.width, doc.height]
+  const gamutReport = useMemo(
+    () => auditDocumentPrintGamut(doc),
+    [doc]
   );
 
-  const handleFitZoom = useCallback(() => {
+  const clearSpaceMetrics = useMemo(
+    () => (showClearSpace ? computeClearSpaceMetrics(doc) : null),
+    [doc, showClearSpace]
+  );
+
+  const displayDoc = useMemo(
+    () => (printProofCmyk ? applyCmykSoftProofToDocument(doc) : doc),
+    [doc, printProofCmyk]
+  );
+
+  const fitWorldBox = useCallback(
+    (
+      bounds: { minX: number; minY: number; width: number; height: number },
+      extraRightReserve = 0
+    ) => {
+      const el = viewportRef.current;
+      if (!el) return;
+      const vw = Math.max(280, el.clientWidth);
+      const vh = Math.max(240, el.clientHeight);
+      const topReserve = rulerUnit !== 'off' ? 92 : 78;
+      const bottomReserve = 96;
+      const horizontalPad = vw < 640 ? 24 : 44;
+      const rightPad = horizontalPad + extraRightReserve;
+      const availableW = Math.max(200, vw - horizontalPad - rightPad);
+      const availableH = Math.max(160, vh - topReserve - bottomReserve);
+      const fitZoom = Math.min(
+        1,
+        Math.max(
+          0.15,
+          +Math.min(
+            availableW / Math.max(1, bounds.width),
+            availableH / Math.max(1, bounds.height)
+          ).toFixed(2)
+        )
+      );
+      const centerX = horizontalPad + availableW / 2;
+      const centerY = topReserve + availableH / 2;
+      const bx = bounds.minX + bounds.width / 2;
+      const by = bounds.minY + bounds.height / 2;
+      setZoom(fitZoom);
+      setPan({
+        x: Math.round(centerX - bx * fitZoom),
+        y: Math.round(centerY - by * fitZoom),
+      });
+    },
+    [rulerUnit]
+  );
+
+  const handleFitActiveArtboard = useCallback(() => {
     userAdjustedZoomRef.current = false;
+    const activePos = positionedArtboards[resolvedActiveIndex] ?? positionedArtboards[0];
+    if (!activePos) return;
+    fitWorldBox({
+      minX: activePos.x,
+      minY: activePos.y,
+      width: activePos.doc.width,
+      height: activePos.doc.height,
+    });
+  }, [fitWorldBox, positionedArtboards, resolvedActiveIndex]);
+
+  const handleFitAllArtboards = useCallback(() => {
+    userAdjustedZoomRef.current = false;
+    fitWorldBox(
+      worldBounds,
+      onAddResponsiveArtboard && positionedArtboards.length > 1 ? 190 : 0
+    );
+  }, [fitWorldBox, worldBounds, onAddResponsiveArtboard, positionedArtboards.length]);
+
+  const setZoomCentered = useCallback((nextZoomRaw: number) => {
+    const nextZoom = Math.min(4, Math.max(0.15, +nextZoomRaw.toFixed(2)));
     const el = viewportRef.current;
     if (!el) {
-      setZoom(1);
+      setZoom(nextZoom);
       return;
     }
-    setZoom(computeFitZoom(el.clientWidth, el.clientHeight));
-  }, [computeFitZoom]);
+    const { zoom: oldZoom, pan: oldPan } = panCameraRef.current;
+    const cx = el.clientWidth / 2;
+    const cy = el.clientHeight / 2;
+    const wx = (cx - oldPan.x) / oldZoom;
+    const wy = (cy - oldPan.y) / oldZoom;
+    setZoom(nextZoom);
+    setPan({
+      x: Math.round(cx - wx * nextZoom),
+      y: Math.round(cy - wy * nextZoom),
+    });
+  }, []);
 
   const syncRulerMetrics = useCallback(() => {
     const vp = viewportRef.current;
@@ -419,15 +623,26 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     });
   }, []);
 
-  // Responsive auto-fit on mobile/tablet viewports via ResizeObserver
+  // Responsive auto-fit on mount / resize when user hasn't manually zoomed or panned
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
 
     const applyResponsiveFit = () => {
       if (!userAdjustedZoomRef.current) {
-        const fit = computeFitZoom(el.clientWidth, el.clientHeight);
-        setZoom(fit);
+        if (positionedArtboards.length > 1) {
+          fitWorldBox(worldBounds, onAddResponsiveArtboard ? 190 : 0);
+        } else {
+          const activePos = positionedArtboards[resolvedActiveIndex] ?? positionedArtboards[0];
+          if (activePos) {
+            fitWorldBox({
+              minX: activePos.x,
+              minY: activePos.y,
+              width: activePos.doc.width,
+              height: activePos.doc.height,
+            });
+          }
+        }
       }
       requestAnimationFrame(syncRulerMetrics);
     };
@@ -440,12 +655,123 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [computeFitZoom, syncRulerMetrics]);
+  }, [
+    fitWorldBox,
+    syncRulerMetrics,
+    positionedArtboards,
+    resolvedActiveIndex,
+    worldBounds,
+    onAddResponsiveArtboard,
+  ]);
+
+  // Smoothly frame all artboards when adding a new responsive lockup side-by-side
+  useEffect(() => {
+    if (workspaceArtboards.length > prevArtboardCountRef.current) {
+      userAdjustedZoomRef.current = false;
+      requestAnimationFrame(() => {
+        fitWorldBox(
+          worldBounds,
+          onAddResponsiveArtboard && positionedArtboards.length > 1 ? 190 : 0
+        );
+      });
+    }
+    prevArtboardCountRef.current = workspaceArtboards.length;
+  }, [
+    workspaceArtboards.length,
+    worldBounds,
+    fitWorldBox,
+    onAddResponsiveArtboard,
+    positionedArtboards.length,
+  ]);
 
   useEffect(() => {
     const id = requestAnimationFrame(syncRulerMetrics);
     return () => cancelAnimationFrame(id);
-  }, [zoom, doc.width, doc.height, rulerUnit, syncRulerMetrics]);
+  }, [zoom, pan.x, pan.y, doc.width, doc.height, resolvedActiveIndex, rulerUnit, syncRulerMetrics]);
+
+  // Wheel pan & Ctrl/Cmd+Wheel zoom anchored to cursor
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      userAdjustedZoomRef.current = true;
+      const { zoom: curZoom, pan: curPan } = panCameraRef.current;
+      if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const factor = Math.exp(-e.deltaY * 0.0025);
+        const nextZoom = Math.min(4, Math.max(0.15, +(curZoom * factor).toFixed(3)));
+        const wx = (mx - curPan.x) / curZoom;
+        const wy = (my - curPan.y) / curZoom;
+        setZoom(nextZoom);
+        setPan({
+          x: Math.round(mx - wx * nextZoom),
+          y: Math.round(my - wy * nextZoom),
+        });
+      } else {
+        setPan({
+          x: Math.round(curPan.x - e.deltaX),
+          y: Math.round(curPan.y - e.deltaY),
+        });
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Close "+ Artboard" dropdown on outside click
+  useEffect(() => {
+    if (!addArtboardMenuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (
+        addArtboardMenuRef.current?.contains(target) ||
+        addArtboardButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setAddArtboardMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [addArtboardMenuOpen]);
+
+  useEffect(() => {
+    if (!prepressMenuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (
+        prepressMenuRef.current?.contains(target) ||
+        prepressButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setPrepressMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [prepressMenuOpen]);
+
+  useEffect(() => {
+    if (!viewportCommandRef) return;
+    viewportCommandRef.current = {
+      fitActive: handleFitActiveArtboard,
+      fitAll: handleFitAllArtboards,
+      cycleGrid: () =>
+        setGridMode((m) =>
+          m === 'off' ? 'square' : m === 'square' ? 'thirds' : m === 'thirds' ? 'golden' : 'off'
+        ),
+      cycleRuler: () =>
+        setRulerUnit((u) => (u === 'px' ? 'mm' : u === 'mm' ? 'off' : 'px')),
+      toggleSnap: () => setSnapEnabled((v) => !v),
+      togglePan: () => setHandMode((v) => !v),
+    };
+    return () => {
+      viewportCommandRef.current = null;
+    };
+  }, [viewportCommandRef, handleFitActiveArtboard, handleFitAllArtboards]);
 
   const clientToArtboard = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -844,6 +1170,12 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
         return;
       }
 
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault();
+        setIsSpacePressed(true);
+        return;
+      }
+
       if (cur.selectedLayerIds.length > 0) {
         const step = e.shiftKey ? 10 : 1;
         if (e.key === 'ArrowLeft') {
@@ -862,8 +1194,24 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
       }
     };
 
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+
+    const onWindowBlur = () => {
+      setIsSpacePressed(false);
+    };
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
+    };
   }, []);
 
   // =========================================================================
@@ -1395,18 +1743,51 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
     (l): l is TextLayer => l.id === editingTextId && l.type === 'text'
   );
 
-  const scaledW = Math.round(doc.width * zoom);
-  const scaledH = Math.round(doc.height * zoom);
-
   const cycleGridMode = useCallback(() => {
     setGridMode((m) =>
       m === 'off' ? 'square' : m === 'square' ? 'thirds' : m === 'thirds' ? 'golden' : 'off'
     );
   }, []);
 
+  const startPanDrag = useCallback((startX: number, startY: number) => {
+    userAdjustedZoomRef.current = true;
+    const initialPan = panCameraRef.current.pan;
+    panDragRef.current = {
+      startClientX: startX,
+      startClientY: startY,
+      startPanX: initialPan.x,
+      startPanY: initialPan.y,
+    };
+    setIsPanning(true);
+
+    const onMove = (ev: PointerEvent) => {
+      const drag = panDragRef.current;
+      if (!drag) return;
+      setPan({
+        x: Math.round(drag.startPanX + (ev.clientX - drag.startClientX)),
+        y: Math.round(drag.startPanY + (ev.clientY - drag.startClientY)),
+      });
+    };
+
+    const onUp = () => {
+      panDragRef.current = null;
+      setIsPanning(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }, []);
+
+  const panModeActive = isSpacePressed || handMode;
+  const dotSpacing = Math.max(12, Math.round(28 * zoom));
+
   return (
     <div className="relative flex flex-1 flex-col min-w-0 bg-[#F1F3F6] dark:bg-[#0F1117] transition-colors">
-      {/* Workspace Container with Edge Rulers + Scrollable Canvas Viewport + Floating Bars */}
+      {/* Workspace Container with Edge Rulers + Infinite Pan/Zoom Stage + Floating Bars */}
       <div className="relative flex flex-1 min-h-[320px] sm:min-h-[420px] overflow-hidden">
         {/* Top-Left Ruler Corner Unit Toggle */}
         {rulerUnit !== 'off' && (
@@ -1593,51 +1974,17 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           );
         })()}
 
-        {/* Scrollable Workspace Viewport */}
+        {/* Pinned Top Floating Contextual Action Bar */}
         <div
-          ref={viewportRef}
-          onScroll={syncRulerMetrics}
-          onPointerMove={(e) => {
-            if (rulerUnit === 'off') return;
-            const rect = svgRef.current?.getBoundingClientRect();
-            if (!rect || rect.width === 0 || rect.height === 0) return;
-            const ax = ((e.clientX - rect.left) / rect.width) * doc.width;
-            const ay = ((e.clientY - rect.top) / rect.height) * doc.height;
-            setCursorCoords({ x: ax, y: ay });
-          }}
-          onPointerLeave={() => setCursorCoords(null)}
-          className={`relative flex-1 overflow-auto ${
-            rulerUnit !== 'off'
-              ? 'pt-9 pl-9 pr-4 pb-16 sm:pt-10 sm:pl-10 sm:pr-7 sm:pb-16'
-              : 'px-3.5 pt-4 pb-16 sm:px-6 lg:px-8'
-          }`}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) {
-              onSelectLayers([]);
-              setEditingTextId(null);
-            }
-          }}
+          className={`pointer-events-none absolute ${
+            rulerUnit !== 'off' ? 'top-7 left-7' : 'top-3 left-3'
+          } right-3 z-30 flex justify-center`}
         >
-        {editorNotice && (
-          <div className="pointer-events-none fixed top-16 left-1/2 z-40 -translate-x-1/2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 shadow-lg backdrop-blur">
-            {editorNotice}
-          </div>
-        )}
-
-        <div
-          className="flex min-h-full w-full flex-col items-center justify-center"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) {
-              onSelectLayers([]);
-              setEditingTextId(null);
-            }
-          }}
-        >
-          {/* Floating Contextual Action Bar — positioned 16px (mb-4) directly above the artboard */}
-          <div className="sticky top-1 z-30 mb-4 max-w-full">
+          <div className="pointer-events-auto max-w-full">
             <FloatingContextToolbar
               doc={doc}
               activePalette={activePalette}
+              brandTokens={brandTokens}
               selectedLayers={selectedLayers}
               gridMode={gridMode}
               onCycleGridMode={cycleGridMode}
@@ -1680,68 +2027,332 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               }
             />
           </div>
+        </div>
 
+        {editorNotice && (
+          <div
+            className={`pointer-events-none absolute left-1/2 z-40 -translate-x-1/2 whitespace-nowrap rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 shadow-lg backdrop-blur ${
+              printProofCmyk ? 'top-[154px]' : 'top-[116px]'
+            }`}
+          >
+            {editorNotice}
+          </div>
+        )}
+
+        {printProofCmyk && (
+          <div
+            data-testid="cmyk-soft-proof-banner"
+            className={`absolute top-[116px] right-4 z-30 flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold shadow-md backdrop-blur-md ${
+              gamutReport.hasOutOfGamut
+                ? 'border-amber-300 dark:border-amber-700/70 bg-amber-50/95 dark:bg-amber-950/85 text-amber-900 dark:text-amber-200'
+                : 'border-indigo-200 dark:border-indigo-500/50 bg-white/95 dark:bg-[#181B23]/95 text-indigo-800 dark:text-indigo-200'
+            }`}
+          >
+            <Printer className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              CMYK Soft-Proof
+              {gamutReport.hasOutOfGamut
+                ? ` · ${gamutReport.outOfGamutSwatches.length} Out-of-Gamut`
+                : ' · In Gamut'}
+            </span>
+            {gamutReport.hasOutOfGamut && onSnapToPrintGamut && (
+              <button
+                type="button"
+                data-testid="banner-snap-gamut-btn"
+                onClick={() => onSnapToPrintGamut()}
+                className="rounded-full bg-amber-600 hover:bg-amber-700 px-2 py-0.5 text-[10px] font-bold text-white cursor-pointer"
+              >
+                Snap to CMYK
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleTogglePrintProof}
+              aria-label="Exit CMYK Soft-Proof"
+              className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
+        {/* Infinite Multi-Artboard Pan & Zoom Canvas Viewport */}
         <div
-          ref={artboardBoxRef}
-          className="relative shrink-0 shadow-[0_14px_42px_rgba(15,23,42,0.14)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.58)] ring-1 ring-[#E2E8F0] dark:ring-[#2A2F3D]"
+          ref={viewportRef}
+          data-testid="multi-artboard-stage"
+          onPointerDownCapture={(e) => {
+            if (panModeActive || e.button === 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              startPanDrag(e.clientX, e.clientY);
+            }
+          }}
+          onPointerDown={(e) => {
+            if (panModeActive || e.button === 1) return;
+            if (e.target === e.currentTarget) {
+              onSelectLayers([]);
+              setEditingTextId(null);
+            }
+          }}
+          onPointerMove={(e) => {
+            if (rulerUnit === 'off') return;
+            const rect = svgRef.current?.getBoundingClientRect();
+            if (!rect || rect.width === 0 || rect.height === 0) return;
+            const ax = ((e.clientX - rect.left) / rect.width) * doc.width;
+            const ay = ((e.clientY - rect.top) / rect.height) * doc.height;
+            setCursorCoords({ x: ax, y: ay });
+          }}
+          onPointerLeave={() => setCursorCoords(null)}
+          className={`relative flex-1 overflow-hidden select-none ${
+            isPanning
+              ? 'cursor-grabbing'
+              : panModeActive
+                ? 'cursor-grab'
+                : ''
+          }`}
           style={{
-            width: scaledW,
-            height: scaledH,
-            backgroundImage: doc.transparentBackground
-              ? 'linear-gradient(45deg, #e5e5e5 25%, transparent 25%), linear-gradient(-45deg, #e5e5e5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e5e5 75%), linear-gradient(-45deg, transparent 75%, #e5e5e5 75%)'
-              : undefined,
-            backgroundSize: doc.transparentBackground ? '20px 20px' : undefined,
-            backgroundPosition: doc.transparentBackground
-              ? '0 0, 0 10px, 10px -10px, -10px 0'
-              : undefined,
-            backgroundColor: doc.transparentBackground ? '#ffffff' : doc.backgroundColor,
+            backgroundImage:
+              'radial-gradient(circle, rgba(148, 163, 184, 0.28) 1px, transparent 1px)',
+            backgroundSize: `${dotSpacing}px ${dotSpacing}px`,
+            backgroundPosition: `${pan.x % dotSpacing}px ${pan.y % dotSpacing}px`,
           }}
         >
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${doc.width} ${doc.height}`}
-            style={{ isolation: 'isolate' }}
-            className={`h-full w-full select-none block touch-none ${
-              canvasToolMode === 'pen' ? 'cursor-crosshair' : ''
-            }`}
-            onPointerDown={(e) => {
-              if (canvasToolMode === 'pen') {
-                startPenPointerDown(e);
-                return;
-              }
-              if (
-                e.target === e.currentTarget ||
-                (e.target as Element).getAttribute('data-bg') === 'true'
-              ) {
-                if (canvasToolMode !== 'select') {
-                  onChangeToolMode?.('select');
-                }
-                startMarqueeSelection(e);
-              }
-            }}
-            onPointerMove={(e) => {
-              if (canvasToolMode === 'pen' && penDraft) {
-                const pt = clientToArtboard(e.clientX, e.clientY);
-                setPenDraft((prev) => (prev ? { ...prev, cursor: pt } : prev));
-              }
-            }}
-            onDoubleClick={(e) => {
-              if (canvasToolMode === 'pen' && penDraft && penDraft.nodes.length >= 2) {
-                e.stopPropagation();
-                commitPenPath(penDraft.nodes, false);
-              }
+          {/* Infinite Pan/Zoom World Transform Container */}
+          <div
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: '0 0',
+              width: 0,
+              height: 0,
+              position: 'relative',
             }}
           >
-            {!doc.transparentBackground && (
-              <rect
-                data-bg="true"
-                x={0}
-                y={0}
-                width={doc.width}
-                height={doc.height}
-                fill={doc.backgroundColor}
-              />
-            )}
+            {positionedArtboards.map(({ doc: ab, x: worldX, y: worldY, index: abIdx }) => {
+              const isActive = abIdx === resolvedActiveIndex;
+              const abRoleLabel =
+                ab.artboardRole === 'primary-horizontal'
+                  ? 'Primary Horizontal'
+                  : ab.artboardRole === 'stacked-badge'
+                    ? 'Stacked Badge'
+                    : ab.artboardRole === 'app-icon'
+                      ? 'App Icon'
+                      : ab.artboardRole === 'social-banner'
+                        ? 'Social Banner'
+                        : ab.title || `Artboard ${abIdx + 1}`;
+              const headerScale = Math.min(1.6, Math.max(0.7, 1 / zoom));
+
+              if (!isActive) {
+                const proofedAb = printProofCmyk ? applyCmykSoftProofToDocument(ab) : ab;
+                return (
+                  <div
+                    key={ab.id}
+                    data-testid={`artboard-card-${abIdx}`}
+                    style={{
+                      position: 'absolute',
+                      left: worldX,
+                      top: worldY,
+                      width: ab.width,
+                      height: ab.height,
+                    }}
+                    onPointerDown={(e) => {
+                      if (panModeActive || e.button === 1) return;
+                      e.stopPropagation();
+                      setEditingTextId(null);
+                      onSwitchArtboard?.(abIdx);
+                    }}
+                    className="group cursor-pointer rounded-[2px] shadow-[0_10px_30px_rgba(15,23,42,0.10)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.48)] ring-1 ring-[#CBD5E1] dark:ring-[#334155] hover:ring-2 hover:ring-indigo-400 transition-shadow"
+                  >
+                    {/* Inverse-scaled floating artboard label bar */}
+                    <div
+                      className="absolute left-0 bottom-full mb-2 flex items-center gap-2 whitespace-nowrap origin-bottom-left"
+                      style={{ transform: `scale(${headerScale})` }}
+                    >
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/95 dark:bg-[#181B23]/95 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 shadow-xs">
+                        <span>{abRoleLabel}</span>
+                        <span className="font-mono-num text-[10px] text-slate-400">
+                          {ab.width}×{ab.height}
+                        </span>
+                      </span>
+                      {workspaceArtboards.length > 1 && onRemoveArtboard && (
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveArtboard(abIdx);
+                          }}
+                          title={`Delete ${abRoleLabel}`}
+                          className="rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/95 dark:bg-[#181B23]/95 p-1 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div
+                      className="h-full w-full overflow-hidden"
+                      style={{
+                        backgroundImage: proofedAb.transparentBackground
+                          ? 'linear-gradient(45deg, #e5e5e5 25%, transparent 25%), linear-gradient(-45deg, #e5e5e5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e5e5 75%), linear-gradient(-45deg, transparent 75%, #e5e5e5 75%)'
+                          : undefined,
+                        backgroundSize: proofedAb.transparentBackground ? '20px 20px' : undefined,
+                        backgroundPosition: proofedAb.transparentBackground
+                          ? '0 0, 0 10px, 10px -10px, -10px 0'
+                          : undefined,
+                        backgroundColor: proofedAb.transparentBackground
+                          ? '#ffffff'
+                          : proofedAb.backgroundColor,
+                      }}
+                    >
+                      <svg
+                        viewBox={`0 0 ${proofedAb.width} ${proofedAb.height}`}
+                        style={{ isolation: 'isolate' }}
+                        className="block h-full w-full select-none"
+                      >
+                        {!proofedAb.transparentBackground && (
+                          <rect
+                            x={0}
+                            y={0}
+                            width={proofedAb.width}
+                            height={proofedAb.height}
+                            fill={proofedAb.backgroundColor}
+                          />
+                        )}
+                        <LogoSceneLayers
+                          doc={proofedAb}
+                          docBg={
+                            proofedAb.transparentBackground
+                              ? 'transparent'
+                              : proofedAb.backgroundColor
+                          }
+                          idPrefix={`canvas-ab-${proofedAb.id}`}
+                          wrapInteractiveLayer={(layer, node) => (
+                            <g
+                              onPointerDown={(e) => {
+                                if (panModeActive || e.button === 1) return;
+                                e.stopPropagation();
+                                setEditingTextId(null);
+                                onSwitchArtboard?.(abIdx, [layer.id]);
+                              }}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              {node}
+                            </g>
+                          )}
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={ab.id}
+                  data-testid={`artboard-card-${abIdx}`}
+                  style={{
+                    position: 'absolute',
+                    left: worldX,
+                    top: worldY,
+                    width: doc.width,
+                    height: doc.height,
+                  }}
+                >
+                  {/* Inverse-scaled Active Artboard Header Bar */}
+                  <div
+                    className="absolute left-0 bottom-full mb-2 flex items-center gap-2 whitespace-nowrap origin-bottom-left"
+                    style={{ transform: `scale(${headerScale})` }}
+                  >
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-indigo-400/70 dark:border-indigo-500/60 bg-white dark:bg-[#181B23] px-2.5 py-0.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 shadow-sm">
+                      <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />
+                      <span>{abRoleLabel}</span>
+                      <span className="font-mono-num text-[10px] font-medium text-slate-400">
+                        {doc.width}×{doc.height}
+                      </span>
+                    </span>
+                    {workspaceArtboards.length > 1 && onRemoveArtboard && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveArtboard(abIdx)}
+                        title={`Delete ${abRoleLabel}`}
+                        className="rounded-md border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] p-1 text-slate-500 hover:text-red-500 shadow-xs cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div
+                    ref={artboardBoxRef}
+                    className={`relative h-full w-full shadow-[0_14px_42px_rgba(15,23,42,0.16)] dark:shadow-[0_18px_48px_rgba(0,0,0,0.58)] ${
+                      workspaceArtboards.length > 1
+                        ? 'ring-2 ring-indigo-500 dark:ring-indigo-400'
+                        : 'ring-1 ring-[#E2E8F0] dark:ring-[#2A2F3D]'
+                    }`}
+                    style={{
+                      backgroundImage: doc.transparentBackground
+                        ? 'linear-gradient(45deg, #e5e5e5 25%, transparent 25%), linear-gradient(-45deg, #e5e5e5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e5e5 75%), linear-gradient(-45deg, transparent 75%, #e5e5e5 75%)'
+                        : undefined,
+                      backgroundSize: doc.transparentBackground ? '20px 20px' : undefined,
+                      backgroundPosition: doc.transparentBackground
+                        ? '0 0, 0 10px, 10px -10px, -10px 0'
+                        : undefined,
+                      backgroundColor: displayDoc.transparentBackground
+                        ? '#ffffff'
+                        : displayDoc.backgroundColor,
+                    }}
+                  >
+                    <svg
+                      ref={svgRef}
+                      viewBox={`0 0 ${doc.width} ${doc.height}`}
+                      style={{ isolation: 'isolate', overflow: 'visible' }}
+                      className={`h-full w-full select-none block touch-none ${
+                        canvasToolMode === 'pen' ? 'cursor-crosshair' : ''
+                      }`}
+                      onPointerDown={(e) => {
+                        if (panModeActive || e.button === 1) return;
+                        if (canvasToolMode === 'pen') {
+                          startPenPointerDown(e);
+                          return;
+                        }
+                        if (
+                          e.target === e.currentTarget ||
+                          (e.target as Element).getAttribute('data-bg') === 'true'
+                        ) {
+                          if (canvasToolMode !== 'select') {
+                            onChangeToolMode?.('select');
+                          }
+                          startMarqueeSelection(e);
+                        }
+                      }}
+                      onPointerMove={(e) => {
+                        if (canvasToolMode === 'pen' && penDraft) {
+                          const pt = clientToArtboard(e.clientX, e.clientY);
+                          setPenDraft((prev) => (prev ? { ...prev, cursor: pt } : prev));
+                        }
+                      }}
+                      onDoubleClick={(e) => {
+                        if (canvasToolMode === 'pen' && penDraft && penDraft.nodes.length >= 2) {
+                          e.stopPropagation();
+                          commitPenPath(penDraft.nodes, false);
+                        }
+                      }}
+                    >
+                      <defs>
+                        <clipPath id={`active-ab-clip-${doc.id}`}>
+                          <rect x={0} y={0} width={doc.width} height={doc.height} />
+                        </clipPath>
+                      </defs>
+                      {!displayDoc.transparentBackground && (
+                        <rect
+                          data-bg="true"
+                          x={0}
+                          y={0}
+                          width={doc.width}
+                          height={doc.height}
+                          fill={displayDoc.backgroundColor}
+                        />
+                      )}
 
             {gridMode === 'square' && (
               <g pointerEvents="none" opacity={0.42}>
@@ -1914,50 +2525,106 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               );
             })()}
 
-            {/* Render All Scene Layers with Knockout Masks, Blend Modes & Surface Textures */}
-            <LogoSceneLayers
-              doc={doc}
-              docBg={doc.transparentBackground ? 'transparent' : doc.backgroundColor}
-              idPrefix="canvas"
-              wrapInteractiveLayer={(layer, node) => (
-                <g
-                  onPointerDown={(e) => {
-                    if (canvasToolMode === 'pen') return;
-                    startLayerDrag(e, layer);
-                  }}
-                  onDoubleClick={(e) => {
-                    if (canvasToolMode === 'pen') return;
-                    e.stopPropagation();
-                    if (layer.type === 'text' && !layer.locked && canvasToolMode === 'select') {
-                      setEditingTextId(layer.id);
-                    } else if (layer.type === 'path' && !layer.locked) {
-                      onSelectLayers([layer.id]);
-                      onChangeToolMode?.('nodes');
-                    }
-                  }}
-                  style={{
-                    cursor:
-                      canvasToolMode === 'pen'
-                        ? 'crosshair'
-                        : layer.locked
-                          ? 'not-allowed'
-                          : 'move',
-                    touchAction: 'none',
-                  }}
-                >
-                  {node}
-                </g>
-              )}
-            />
+            {/* Render All Scene Layers (Soft-Proofed when CMYK Print Proof is enabled) */}
+            <g clipPath={`url(#active-ab-clip-${doc.id})`}>
+              <LogoSceneLayers
+                doc={displayDoc}
+                docBg={
+                  displayDoc.transparentBackground ? 'transparent' : displayDoc.backgroundColor
+                }
+                idPrefix={`canvas-ab-${doc.id}`}
+                wrapInteractiveLayer={(layer, node) => {
+                  const realLayer = doc.layers.find((l) => l.id === layer.id) ?? layer;
+                  return (
+                    <g
+                      onPointerDown={(e) => {
+                        if (canvasToolMode === 'pen') return;
+                        startLayerDrag(e, realLayer);
+                      }}
+                      onDoubleClick={(e) => {
+                        if (canvasToolMode === 'pen') return;
+                        e.stopPropagation();
+                        if (
+                          realLayer.type === 'text' &&
+                          !realLayer.locked &&
+                          canvasToolMode === 'select'
+                        ) {
+                          setEditingTextId(realLayer.id);
+                        } else if (realLayer.type === 'path' && !realLayer.locked) {
+                          onSelectLayers([realLayer.id]);
+                          onChangeToolMode?.('nodes');
+                        }
+                      }}
+                      style={{
+                        cursor:
+                          canvasToolMode === 'pen'
+                            ? 'crosshair'
+                            : realLayer.locked
+                              ? 'not-allowed'
+                              : 'move',
+                        touchAction: 'none',
+                      }}
+                    >
+                      {node}
+                    </g>
+                  );
+                }}
+              />
+            </g>
+
+            {/* Out-of-Gamut Layer Warning Outlines & Badges (CMYK Soft-Proof Active) */}
+            {printProofCmyk &&
+              gamutReport.outOfGamutLayerIds.length > 0 &&
+              gamutReport.outOfGamutLayerIds.map((id) => {
+                const layer = doc.layers.find((l) => l.id === id);
+                if (!layer || !layer.visible) return null;
+                return (
+                  <g
+                    key={`gamut-warn-${id}`}
+                    data-testid={`gamut-warning-badge-${id}`}
+                    pointerEvents="none"
+                  >
+                    <rect
+                      x={layer.x - 3}
+                      y={layer.y - 3}
+                      width={layer.width + 6}
+                      height={layer.height + 6}
+                      rx={4}
+                      fill="none"
+                      stroke="#D97706"
+                      strokeWidth={1.6 / zoom}
+                      strokeDasharray={`${5 / zoom} ${3 / zoom}`}
+                    />
+                    <rect
+                      x={layer.x + layer.width - 78}
+                      y={Math.max(2, layer.y - 18)}
+                      width={78}
+                      height={15}
+                      rx={3}
+                      fill="#D97706"
+                    />
+                    <text
+                      x={layer.x + layer.width - 39}
+                      y={Math.max(12.5, layer.y - 7.5)}
+                      textAnchor="middle"
+                      fill="#FFFFFF"
+                      fontSize={8.5}
+                      fontWeight={700}
+                      fontFamily="'JetBrains Mono', monospace"
+                    >
+                      OUT OF GAMUT
+                    </text>
+                  </g>
+                );
+              })}
 
             {/* Print Bleed Overlay (3mm ≈ 12px Trim Frame & Crop Marks) */}
             {showBleed && (() => {
               const bleed = 12; // ~3.175mm at 96dpi
               const bw = doc.width - bleed * 2;
               const bh = doc.height - bleed * 2;
-              const mark = 16;
               return (
-                <g pointerEvents="none">
+                <g data-testid="prepress-bleed-guides" pointerEvents="none">
                   <path
                     d={`M 0 0 H ${doc.width} V ${doc.height} H 0 Z M ${bleed} ${bleed} V ${bleed + bh} H ${bleed + bw} V ${bleed} Z`}
                     fill="#E11D48"
@@ -1974,34 +2641,176 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                     strokeWidth={1.4 / zoom}
                     strokeDasharray="5 3"
                   />
-                  <path
-                    d={`M ${bleed} 0 V ${mark} M 0 ${bleed} H ${mark}
-                        M ${bleed + bw} 0 V ${mark} M ${doc.width} ${bleed} H ${doc.width - mark}
-                        M ${bleed} ${doc.height} V ${doc.height - mark} M 0 ${bleed + bh} H ${mark}
-                        M ${bleed + bw} ${doc.height} V ${doc.height - mark} M ${doc.width} ${bleed + bh} H ${doc.width - mark}`}
-                    fill="none"
-                    stroke="#E11D48"
-                    strokeWidth={1.5 / zoom}
-                  />
                   <rect
                     x={bleed + 8}
                     y={bleed + 6}
-                    width={138}
+                    width={184}
                     height={20}
                     rx={4}
                     fill="#E11D48"
-                    fillOpacity={0.92}
+                    fillOpacity={0.94}
                   />
                   <text
-                    x={bleed + 15}
-                    y={bleed + 19}
+                    x={bleed + 8 + 92}
+                    y={bleed + 19.5}
+                    textAnchor="middle"
                     fill="#FFFFFF"
                     fontSize={9.5}
                     fontWeight={700}
                     fontFamily="'JetBrains Mono', monospace"
                   >
-                    BLEED TRIM · 3MM (12PX)
+                    BLEED GUIDES · 3MM (12PX)
                   </text>
+                </g>
+              );
+            })()}
+
+            {/* Standard Pre-Press Exterior Crop Marks & Registration Targets */}
+            {showCropMarks && (() => {
+              const offset = 8;
+              const len = 24;
+              const midX = doc.width / 2;
+              const midY = doc.height / 2;
+              const regOffset = 20;
+              const strokeCol = '#E11D48';
+              const regTargets = [
+                { cx: midX, cy: -regOffset },
+                { cx: midX, cy: doc.height + regOffset },
+                { cx: -regOffset, cy: midY },
+                { cx: doc.width + regOffset, cy: midY },
+              ];
+              return (
+                <g data-testid="prepress-crop-marks" pointerEvents="none">
+                  {/* Corner L-shaped print crop/trim lines */}
+                  <path
+                    d={`M 0 ${-offset} V ${-(offset + len)} M ${-offset} 0 H ${-(offset + len)}
+                        M ${doc.width} ${-offset} V ${-(offset + len)} M ${doc.width + offset} 0 H ${doc.width + offset + len}
+                        M 0 ${doc.height + offset} V ${doc.height + offset + len} M ${-offset} ${doc.height} H ${-(offset + len)}
+                        M ${doc.width} ${doc.height + offset} V ${doc.height + offset + len} M ${doc.width + offset} ${doc.height} H ${doc.width + offset + len}`}
+                    fill="none"
+                    stroke={strokeCol}
+                    strokeWidth={1.6 / zoom}
+                  />
+                  {/* Registration bullseye targets on all 4 centerlines */}
+                  {regTargets.map((pt, idx) => (
+                    <g key={`reg-${idx}`}>
+                      <circle
+                        cx={pt.cx}
+                        cy={pt.cy}
+                        r={7}
+                        fill="none"
+                        stroke={strokeCol}
+                        strokeWidth={1.2 / zoom}
+                      />
+                      <line
+                        x1={pt.cx - 10}
+                        y1={pt.cy}
+                        x2={pt.cx + 10}
+                        y2={pt.cy}
+                        stroke={strokeCol}
+                        strokeWidth={1.1 / zoom}
+                      />
+                      <line
+                        x1={pt.cx}
+                        y1={pt.cy - 10}
+                        x2={pt.cx}
+                        y2={pt.cy + 10}
+                        stroke={strokeCol}
+                        strokeWidth={1.1 / zoom}
+                      />
+                    </g>
+                  ))}
+                  {/* CMYK Ink Control Strip bottom-right outside trim */}
+                  <g transform={`translate(${doc.width - 68}, ${doc.height + 11})`}>
+                    <rect x={0} y={0} width={14} height={9} fill="#009EDA" />
+                    <rect x={16} y={0} width={14} height={9} fill="#DA207E" />
+                    <rect x={32} y={0} width={14} height={9} fill="#FCEB18" />
+                    <rect x={48} y={0} width={14} height={9} fill="#181716" />
+                  </g>
+                </g>
+              );
+            })()}
+
+            {/* Brand-Guideline 1x Clear-Space Margin Box around Logo Artwork */}
+            {showClearSpace && clearSpaceMetrics && (() => {
+              const cs = clearSpaceMetrics;
+              const u = cs.unit;
+              const csColor = cs.overflowsArtboard ? '#D97706' : '#4F46E5';
+              return (
+                <g data-testid="prepress-clear-space" pointerEvents="none">
+                  {/* Artwork bounds */}
+                  <rect
+                    x={cs.artMinX}
+                    y={cs.artMinY}
+                    width={cs.artWidth}
+                    height={cs.artHeight}
+                    fill="none"
+                    stroke={csColor}
+                    strokeWidth={1 / zoom}
+                    strokeDasharray="3 3"
+                    opacity={0.7}
+                  />
+                  {/* Outer 1x clear-space exclusion perimeter */}
+                  <rect
+                    x={cs.boxX}
+                    y={cs.boxY}
+                    width={cs.boxWidth}
+                    height={cs.boxHeight}
+                    fill={csColor}
+                    fillOpacity={0.04}
+                    stroke={csColor}
+                    strokeWidth={1.5 / zoom}
+                    strokeDasharray="6 4"
+                  />
+                  {/* Four 1x modular unit squares in corners */}
+                  {[
+                    { x: cs.boxX, y: cs.boxY },
+                    { x: cs.artMaxX, y: cs.boxY },
+                    { x: cs.boxX, y: cs.artMaxY },
+                    { x: cs.artMaxX, y: cs.artMaxY },
+                  ].map((sq, idx) => (
+                    <rect
+                      key={`cs-sq-${idx}`}
+                      x={sq.x}
+                      y={sq.y}
+                      width={u}
+                      height={u}
+                      fill={csColor}
+                      fillOpacity={0.14}
+                      stroke={csColor}
+                      strokeWidth={1 / zoom}
+                    />
+                  ))}
+                  {/* Top-center 1x label pill */}
+                  {(() => {
+                    const csLabel = `1x CLEAR SPACE · ${u}PX`;
+                    const pillW = Math.max(150, Math.round(csLabel.length * 6.5 + 24));
+                    const centerX = cs.boxX + cs.boxWidth / 2;
+                    return (
+                      <>
+                        <rect
+                          x={centerX - pillW / 2}
+                          y={cs.boxY - 22}
+                          width={pillW}
+                          height={18}
+                          rx={4}
+                          fill={csColor}
+                          fillOpacity={0.94}
+                        />
+                        <text
+                          x={centerX}
+                          y={cs.boxY - 9.5}
+                          textAnchor="middle"
+                          fill="#FFFFFF"
+                          fontSize={9.5}
+                          fontWeight={700}
+                          fontFamily="'JetBrains Mono', monospace"
+                        >
+                          {csLabel}
+                        </text>
+                      </>
+                    );
+                  })()}
                 </g>
               );
             })()}
@@ -2050,11 +2859,11 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                   <rect
                     x={mx + 8}
                     y={my + 8}
-                    width={hasClips ? 236 : 162}
+                    width={hasClips ? 256 : 176}
                     height={22}
                     rx={4}
                     fill={zoneColor}
-                    fillOpacity={0.92}
+                    fillOpacity={0.94}
                   />
                   <text
                     x={mx + 16}
@@ -2679,18 +3488,61 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 className="h-full w-full rounded border-2 border-indigo-500 bg-white/95 px-2 text-center font-bold text-[#141413] shadow-md focus:outline-none"
                 style={{
                   fontFamily: editingTextLayer.fontFamily,
-                  fontSize: `${Math.max(14, editingTextLayer.fontSize * zoom * 0.65)}px`,
+                  fontSize: `${Math.max(14, editingTextLayer.fontSize * 0.65)}px`,
                 }}
               />
             </div>
           )}
         </div>
+      </div>
+              );
+            })}
+
+            {/* Inline Infinite-Canvas "+ Add Lockup Artboard" Launcher (inverse-scaled for crisp readability at any zoom) */}
+            {onAddResponsiveArtboard && (
+              <div
+                data-testid="canvas-add-artboard-card"
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  left: worldBounds.maxX + ARTBOARD_GAP_PX,
+                  top: worldBounds.minY,
+                  width: 204,
+                  transform: `scale(${Math.min(4.5, Math.max(0.85, 1 / zoom))})`,
+                  transformOrigin: 'top left',
+                }}
+                className="rounded-xl border border-dashed border-slate-300 dark:border-[#2A2F3D] bg-white/90 dark:bg-[#181B23]/90 p-3 shadow-md backdrop-blur-xs"
+              >
+                <p className="flex items-center gap-1.5 text-[11px] font-bold text-slate-800 dark:text-slate-100">
+                  <LayoutGrid className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                  <span>Add Lockup Artboard</span>
+                </p>
+                <div className="mt-2 grid grid-cols-1 gap-1">
+                  {ARTBOARD_PRESETS.map((preset) => (
+                    <button
+                      key={preset.kind}
+                      type="button"
+                      onClick={() => onAddResponsiveArtboard(preset.kind)}
+                      className="flex items-center justify-between rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-2.5 py-1 text-left text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-300 cursor-pointer transition-colors"
+                    >
+                      <span>+ {preset.label}</span>
+                      <span className="font-mono-num text-[9.5px] text-slate-400">
+                        {preset.kind === 'custom' ? `${doc.width}×${doc.height}` : `${preset.width}×${preset.height}`}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ============================================================== */}
-        {/* FLOATING TOOL HUDs (PEN TOOL / NODE EDITOR / PER-LETTER)       */}
+        {/* PINNED FLOATING TOOL HUDs (PEN TOOL / NODE EDITOR / PER-LETTER) */}
         {/* ============================================================== */}
         {canvasToolMode === 'pen' && (
-          <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
+          <div className="pointer-events-none absolute bottom-16 left-1/2 z-30 -translate-x-1/2 flex justify-center">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
             <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-300">
               <PenTool className="h-3.5 w-3.5" />
               {penAttachTextId
@@ -2744,10 +3596,12 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               Cancel (Esc)
             </button>
           </div>
+          </div>
         )}
 
         {canvasToolMode === 'nodes' && singlePathLayer && (
-          <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
+          <div className="pointer-events-none absolute bottom-16 left-1/2 z-30 -translate-x-1/2 flex justify-center">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-full border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-1.5 text-xs shadow-xl backdrop-blur-md">
             <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-300">
               <Spline className="h-3.5 w-3.5" />
               Node Editor · Drag anchors &amp; handles to sculpt letter serifs
@@ -2785,6 +3639,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               Done (Esc)
             </button>
           </div>
+          </div>
         )}
 
         {canvasToolMode === 'per-letter' && singleTextLayer && perLetterTarget && (() => {
@@ -2817,7 +3672,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             };
 
             return (
-              <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
+              <div className="pointer-events-none absolute bottom-16 left-1/2 z-30 -translate-x-1/2 flex justify-center">
+              <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200 dark:border-indigo-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
                 <span className="inline-flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-300">
                   <SlidersHorizontal className="h-3.5 w-3.5" />
                   Letter &ldquo;{ch}&rdquo; (#{idx + 1})
@@ -2891,6 +3747,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                   Done (Esc)
                 </button>
               </div>
+              </div>
             );
           }
 
@@ -2902,7 +3759,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           const kernVal = kMap[gIdx] ?? 0;
 
           return (
-            <div className="sticky bottom-14 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 dark:border-amber-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
+            <div className="pointer-events-none absolute bottom-16 left-1/2 z-30 -translate-x-1/2 flex justify-center">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 dark:border-amber-500/40 bg-white/95 dark:bg-[#181B23]/95 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
               <span className="inline-flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 Pair Kerning &ldquo;{leftCh} ↔ {rightCh}&rdquo;
@@ -2949,24 +3807,37 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                 Done (Esc)
               </button>
             </div>
+            </div>
           );
         })()}
-        </div>
-        </div>
 
-        {/* Bottom-Left Floating Workspace Controls Pill (Pages, Rulers, Grid, Snap, Bleed, Safe Zone, WCAG) */}
+        {/* Bottom Floating Bar Row (Non-overlapping Left Controls Pill + Right Zoom/Pan Pill) */}
         <div
-          className={`absolute bottom-3.5 ${
+          className={`pointer-events-none absolute bottom-3 right-3.5 ${
             rulerUnit !== 'off' ? 'left-9' : 'left-3.5'
-          } z-30 flex items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/92 dark:bg-[#181B23]/92 px-2.5 py-1.5 text-xs shadow-lg backdrop-blur-md max-w-[calc(100%-260px)] sm:max-w-[calc(100%-360px)] overflow-x-auto`}
+          } z-30 flex flex-wrap items-center justify-between gap-2`}
         >
-          {/* Multi-Page Switcher */}
-          {pages.map((p, idx) => {
-            const active = idx === activePageIndex;
+        {/* Bottom-Left Floating Workspace Controls Pill (Artboards, Rulers, Grid, Snap, Bleed, Safe Zone, WCAG) */}
+        <div
+          className="pointer-events-auto flex max-w-full min-w-0 items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/92 dark:bg-[#181B23]/92 px-2.5 py-1.5 text-xs shadow-lg backdrop-blur-md overflow-x-auto"
+        >
+          {/* Multi-Artboard Switcher */}
+          {workspaceArtboards.map((ab, idx) => {
+            const active = idx === resolvedActiveIndex;
+            const shortLabel =
+              ab.artboardRole === 'primary-horizontal'
+                ? 'Primary'
+                : ab.artboardRole === 'stacked-badge'
+                  ? 'Badge'
+                  : ab.artboardRole === 'app-icon'
+                    ? 'Icon'
+                    : ab.artboardRole === 'social-banner'
+                      ? 'Banner'
+                      : `Artboard ${idx + 1}`;
             return (
               <div
-                key={p.id}
-                className={`inline-flex items-center gap-1 rounded-full border pl-2.5 pr-1.5 py-0.5 text-[11px] font-semibold transition-all shrink-0 ${
+                key={ab.id}
+                className={`inline-flex items-center gap-0.5 rounded-full border pl-2 pr-1 py-0.5 text-[10.5px] font-semibold transition-all shrink-0 ${
                   active
                     ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-500/15 dark:text-indigo-300'
                     : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] text-slate-600 dark:text-slate-300 hover:border-indigo-300'
@@ -2974,16 +3845,20 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               >
                 <button
                   type="button"
-                  onClick={() => onSwitchPage(idx)}
+                  onClick={() =>
+                    onSwitchArtboard ? onSwitchArtboard(idx) : onSwitchPage(idx)
+                  }
                   className="cursor-pointer whitespace-nowrap"
                 >
-                  Page {idx + 1}
+                  {shortLabel}
                 </button>
-                {pages.length > 1 && (
+                {workspaceArtboards.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => onRemovePage(idx)}
-                    title={`Delete Page ${idx + 1}`}
+                    onClick={() =>
+                      onRemoveArtboard ? onRemoveArtboard(idx) : onRemovePage(idx)
+                    }
+                    title={`Delete ${shortLabel}`}
                     className="rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer"
                   >
                     <X className="h-3 w-3" />
@@ -2993,15 +3868,47 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             );
           })}
 
-          <button
-            type="button"
-            onClick={onAddPage}
-            title="Duplicate current artboard as a new page"
-            className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Plus className="h-3 w-3" />
-            <span className="hidden xl:inline">Page</span>
-          </button>
+          {onAddResponsiveArtboard ? (
+            <button
+              ref={addArtboardButtonRef}
+              type="button"
+              data-testid="add-artboard-btn"
+              onClick={() => setAddArtboardMenuOpen((o) => !o)}
+              title="Add responsive lockup artboard side-by-side"
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 dark:border-indigo-500/40 bg-indigo-50/70 dark:bg-indigo-500/10 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Plus className="h-3 w-3" />
+              <span>Artboard</span>
+              <ChevronDown className="h-3 w-3" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onAddPage}
+              title="Duplicate current artboard as a new page"
+              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Plus className="h-3 w-3" />
+              <span className="hidden xl:inline">Page</span>
+            </button>
+          )}
+
+          {workspaceArtboards.length > 1 && onArrangeArtboards && (
+            <button
+              type="button"
+              data-testid="arrange-artboards-btn"
+              onClick={() => {
+                onArrangeArtboards();
+                userAdjustedZoomRef.current = false;
+                requestAnimationFrame(() => handleFitAllArtboards());
+              }}
+              title="Re-align all artboards neatly side-by-side"
+              className="hidden xl:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <LayoutGrid className="h-3 w-3" />
+              <span>Arrange</span>
+            </button>
+          )}
 
           {onSaveProject && (
             <button
@@ -3012,7 +3919,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
                   ? `Auto-saving "${activeProjectName}" (Click to save a snapshot copy)`
                   : 'Save logo to My Projects'
               }
-              className="hidden xl:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+              className="hidden 2xl:inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
               {activeProjectName ? (
                 <BookmarkCheck className="h-3 w-3 text-indigo-600 dark:text-indigo-400" />
@@ -3093,31 +4000,24 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           </button>
 
           <button
+            ref={prepressButtonRef}
             type="button"
-            onClick={() => setShowBleed((v) => !v)}
-            title="Toggle 3mm (12px) Print Bleed Trim Guides"
-            className={`hidden xl:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
-              showBleed
-                ? 'border-rose-600 bg-rose-600 text-white'
-                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
+            data-testid="prepress-menu-btn"
+            onClick={() => setPrepressMenuOpen((o) => !o)}
+            title="Print Pre-Press: CMYK Soft-Proof, Crop Marks, 3mm Bleed & 1x Clear-Space"
+            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-semibold active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              printProofCmyk || showCropMarks || showBleed || showClearSpace || showSafeZone
+                ? 'border-rose-500 bg-rose-50 text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/15 dark:text-rose-300'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300 hover:border-rose-400'
             }`}
           >
-            <Scissors className="h-3 w-3" />
-            <span>Bleed</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowSafeZone((v) => !v)}
-            title="Toggle 8% safe-margin overlay"
-            className={`hidden xl:inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-all cursor-pointer shrink-0 ${
-              showSafeZone
-                ? 'border-teal-600 bg-teal-600 text-white'
-                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#0F1117] text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            <Scan className="h-3 w-3" />
-            <span>Safe</span>
+            <Printer className="h-3 w-3 shrink-0" />
+            <span>Pre-Press</span>
+            {printProofCmyk && gamutReport.hasOutOfGamut && (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
+                {gamutReport.outOfGamutSwatches.length}
+              </span>
+            )}
           </button>
 
           {contrastReport.checkedCount > 0 && (
@@ -3187,13 +4087,31 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           )}
         </div>
 
-        {/* Bottom-Right Floating Status Pill (Zoom 25%–400%, Fit to Screen & Mockup Quick-Toggle) */}
-        <div className="absolute bottom-3.5 right-3.5 z-30 inline-flex items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/92 dark:bg-[#181B23]/92 px-3 py-1.5 text-xs shadow-lg backdrop-blur-md">
+        {/* Bottom-Right Floating Status Pill (Hand Pan, Zoom 15%–400%, Fit / Fit All & Mockups) */}
+        <div className="pointer-events-auto ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white/92 dark:bg-[#181B23]/92 px-3 py-1.5 text-xs shadow-lg backdrop-blur-md">
+          <button
+            type="button"
+            data-testid="hand-tool-btn"
+            onClick={() => setHandMode((v) => !v)}
+            aria-pressed={panModeActive}
+            title="Hand Pan Tool (Hold Spacebar + Drag anywhere)"
+            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold active:scale-95 transition-all cursor-pointer ${
+              panModeActive
+                ? 'border-indigo-600 bg-indigo-600 text-white'
+                : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] text-slate-700 dark:text-slate-200 hover:border-indigo-500'
+            }`}
+          >
+            <Hand className="h-3.5 w-3.5" />
+            <span className="hidden lg:inline">Pan</span>
+          </button>
+
+          <span className="h-4 w-px bg-[#E2E8F0] dark:bg-[#2A2F3D]" aria-hidden="true" />
+
           <button
             type="button"
             onClick={() => {
               userAdjustedZoomRef.current = true;
-              setZoom((z) => Math.max(0.25, +(z - 0.15).toFixed(2)));
+              setZoomCentered(zoom - 0.15);
             }}
             className="rounded-lg p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252A38] active:scale-95 transition-all cursor-pointer"
             aria-label="Zoom out"
@@ -3203,15 +4121,15 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           </button>
           <input
             type="range"
-            min={0.25}
+            min={0.15}
             max={4}
             step={0.05}
             value={zoom}
             onChange={(e) => {
               userAdjustedZoomRef.current = true;
-              setZoom(Number(e.target.value));
+              setZoomCentered(Number(e.target.value));
             }}
-            aria-label="Canvas zoom slider (25% to 400%)"
+            aria-label="Canvas zoom slider (15% to 400%)"
             className="hidden sm:block w-24 accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
           />
           <span className="font-mono-num w-10 text-center text-[11px] font-semibold text-slate-800 dark:text-slate-200">
@@ -3221,7 +4139,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             type="button"
             onClick={() => {
               userAdjustedZoomRef.current = true;
-              setZoom((z) => Math.min(4, +(z + 0.15).toFixed(2)));
+              setZoomCentered(zoom + 0.15);
             }}
             className="rounded-lg p-1 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#252A38] active:scale-95 transition-all cursor-pointer"
             aria-label="Zoom in"
@@ -3232,13 +4150,25 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
 
           <button
             type="button"
-            onClick={handleFitZoom}
+            onClick={handleFitActiveArtboard}
             className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
-            title="Fit artboard to screen"
+            title="Fit active artboard to screen"
           >
             <Maximize2 className="h-3 w-3" />
             <span>Fit</span>
           </button>
+
+          {workspaceArtboards.length > 1 && (
+            <button
+              type="button"
+              data-testid="fit-all-btn"
+              onClick={handleFitAllArtboards}
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 dark:border-indigo-500/40 bg-indigo-50 dark:bg-indigo-500/15 px-2 py-1 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:border-indigo-500 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0"
+              title="Fit all artboards side-by-side into view"
+            >
+              <span>Fit All</span>
+            </button>
+          )}
 
           {onOpenMockups && (
             <>
@@ -3260,6 +4190,75 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
             </>
           )}
         </div>
+        </div>
+
+        {/* Add Lockup Artboard Popover — rendered outside overflow-x-auto pill so it never clips */}
+        {addArtboardMenuOpen && onAddResponsiveArtboard && (
+          <div
+            ref={addArtboardMenuRef}
+            className={`absolute bottom-16 ${
+              rulerUnit !== 'off' ? 'left-9' : 'left-3.5'
+            } z-50 w-64 rounded-xl border border-[#E2E8F0] dark:border-[#2A2F3D] bg-white dark:bg-[#181B23] p-1.5 shadow-2xl`}
+          >
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Add Lockup Artboard
+            </div>
+            {ARTBOARD_PRESETS.map((preset) => (
+              <button
+                key={preset.kind}
+                type="button"
+                data-testid={`add-artboard-preset-${preset.kind}`}
+                onClick={() => {
+                  onAddResponsiveArtboard(preset.kind);
+                  setAddArtboardMenuOpen(false);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left hover:bg-indigo-50 dark:hover:bg-indigo-500/15 cursor-pointer transition-colors"
+              >
+                <div>
+                  <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                    {preset.label}
+                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                    {preset.description}
+                  </div>
+                </div>
+                <span className="font-mono-num text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 shrink-0 ml-2">
+                  {preset.kind === 'custom'
+                    ? `${doc.width}×${doc.height}`
+                    : `${preset.width}×${preset.height}`}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Pre-Press & CMYK Soft-Proof Popover — rendered outside overflow-x-auto pill */}
+        {prepressMenuOpen && (
+          <div
+            ref={prepressMenuRef}
+            className={`absolute bottom-16 ${
+              rulerUnit !== 'off' ? 'left-9' : 'left-3.5'
+            } z-50`}
+          >
+            <PrintPrepressPopover
+              isOpen={prepressMenuOpen}
+              printProofCmyk={printProofCmyk}
+              showCropMarks={showCropMarks}
+              showBleed={showBleed}
+              showClearSpace={showClearSpace}
+              showSafeZone={showSafeZone}
+              gamutReport={gamutReport}
+              onTogglePrintProof={handleTogglePrintProof}
+              onToggleCropMarks={handleToggleCropMarks}
+              onToggleBleed={handleToggleBleed}
+              onToggleClearSpace={handleToggleClearSpace}
+              onToggleSafeZone={handleToggleSafeZone}
+              onSnapAllToPrintGamut={() => onSnapToPrintGamut?.()}
+              onSnapSingleColorToGamut={(hex) => onSnapToPrintGamut?.(hex)}
+              onSelectGamutLayers={(ids) => onSelectLayers(ids)}
+              onClose={() => setPrepressMenuOpen(false)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
