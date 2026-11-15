@@ -845,7 +845,7 @@ function drawCurvedArcText(
 function drawDynamicCrestOnCanvas(
   ctx: CanvasRenderingContext2D,
   crestStyle: CrestStyleId,
-  designDefault: Exclude<CrestStyleId, 'auto' | 'none'>,
+  designDefault: Exclude<CrestStyleId, 'auto' | 'none' | 'clean-logo'>,
   cx: number,
   cy: number,
   radius: number,
@@ -863,6 +863,34 @@ function drawDynamicCrestOnCanvas(
   const effective = crestStyle === 'auto' ? designDefault : crestStyle;
   if (effective === 'none') return;
 
+  const offsetX = !isWatermark ? (symbols?.customLogoOffsetX ?? 0) * (CARD_WIDTH / 680) : 0;
+  const offsetY = !isWatermark ? (symbols?.customLogoOffsetY ?? 0) * (CARD_HEIGHT / 388) : 0;
+  const rotationRad = !isWatermark ? ((symbols?.customLogoRotation ?? 0) * Math.PI) / 180 : 0;
+  const flipX = !isWatermark && symbols?.customLogoFlipX ? -1 : 1;
+  const logoAlpha = !isWatermark ? Math.max(0.15, Math.min(1, (symbols?.customLogoOpacity ?? 100) / 100)) : 1;
+
+  if (effective === 'clean-logo') {
+    if (!customLogoImg || isWatermark) return;
+    ctx.save();
+    ctx.translate(cx + offsetX, cy + offsetY);
+    if (rotationRad !== 0) ctx.rotate(rotationRad);
+    ctx.scale(flipX, 1);
+    ctx.globalAlpha = logoAlpha;
+    const maxW = radius * 2.55;
+    const maxH = radius * 2.15;
+    const natW = Math.max(1, customLogoImg.naturalWidth || customLogoImg.width || 200);
+    const natH = Math.max(1, customLogoImg.naturalHeight || customLogoImg.height || 200);
+    const fit = Math.min(maxW / natW, maxH / natH);
+    const drawW = natW * fit;
+    const drawH = natH * fit;
+    ctx.shadowColor = 'rgba(0,0,0,0.28)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+    ctx.drawImage(customLogoImg, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+    return;
+  }
+
   const finish: CrestFinishMode = isWatermark
     ? 'fine-engraved'
     : symbols?.crestFinish ?? '3d-embossed-coin';
@@ -878,9 +906,11 @@ function drawDynamicCrestOnCanvas(
   const isEnamelInlay = finish === 'enamel-inlay';
 
   ctx.save();
-  ctx.translate(cx, cy);
+  ctx.translate(cx + offsetX, cy + offsetY);
+  if (rotationRad !== 0) ctx.rotate(rotationRad);
   const scale = radius / 60;
-  ctx.scale(scale, scale);
+  ctx.scale(scale * flipX, scale);
+  if (logoAlpha < 1) ctx.globalAlpha *= logoAlpha;
 
   let inkStyle: string | CanvasGradient = accentColor;
   if (foilGradient) {
@@ -1376,11 +1406,12 @@ function drawWatermarkOnCanvas(
   const wm = symbols.watermarkCrest;
   if (!wm || wm === 'none') return;
 
-  const resolvedId: Exclude<CrestStyleId, 'auto' | 'none' | 'postage-stamp'> =
-    wm === 'auto' || wm === 'postage-stamp'
+  const resolvedId: Exclude<CrestStyleId, 'auto' | 'none' | 'postage-stamp' | 'clean-logo'> =
+    wm === 'auto' || wm === 'postage-stamp' || wm === 'clean-logo'
       ? symbols.crestStyle !== 'auto' &&
         symbols.crestStyle !== 'none' &&
-        symbols.crestStyle !== 'postage-stamp'
+        symbols.crestStyle !== 'postage-stamp' &&
+        symbols.crestStyle !== 'clean-logo'
         ? symbols.crestStyle
         : 'justice-scales-seal'
       : wm;
@@ -1476,7 +1507,8 @@ export async function exportCardPng(
   }
 
   const customLogoImg =
-    symbols.crestCenterMode === 'custom-image' && symbols.customLogoDataUrl
+    (symbols.crestCenterMode === 'custom-image' || symbols.crestStyle === 'clean-logo') &&
+    symbols.customLogoDataUrl
       ? await loadOptionalImage(symbols.customLogoDataUrl)
       : null;
 
@@ -1631,10 +1663,22 @@ export async function exportCardPng(
       ctx.roundRect(splitX / 2 - 175, 425, 350, 350, 28);
       ctx.stroke();
 
-      ctx.fillStyle = theme.accentHex;
-      ctx.textBaseline = 'middle';
-      ctx.font = `700 150px ${companyFontCanvas}`;
-      ctx.fillText(details.monogram, splitX / 2, 605);
+      if (
+        (symbols.crestCenterMode === 'custom-image' || symbols.crestStyle === 'clean-logo') &&
+        customLogoImg
+      ) {
+        const natW = Math.max(1, customLogoImg.naturalWidth || customLogoImg.width || 240);
+        const natH = Math.max(1, customLogoImg.naturalHeight || customLogoImg.height || 240);
+        const fit = Math.min(280 / natW, 280 / natH);
+        const dw = natW * fit;
+        const dh = natH * fit;
+        ctx.drawImage(customLogoImg, splitX / 2 - dw / 2, 600 - dh / 2, dw, dh);
+      } else {
+        ctx.fillStyle = theme.accentHex;
+        ctx.textBaseline = 'middle';
+        ctx.font = `700 150px ${companyFontCanvas}`;
+        ctx.fillText(details.monogram, splitX / 2, 605);
+      }
 
       ctx.textBaseline = 'top';
       drawStyledText(ctx, details.cardLabel, splitX / 2, 1045, typography.badge, 30, 600, theme.accentHex, theme);
@@ -1680,7 +1724,7 @@ export async function exportCardPng(
       drawStyledText(ctx, details.tagline, marginX + 136, 304, typography.tagline, 40, 500, theme.textSecondaryHex, theme);
 
       if (symbols.crestStyle !== 'none') {
-        const defaultForDesign: Exclude<CrestStyleId, 'auto' | 'none'> =
+        const defaultForDesign: Exclude<CrestStyleId, 'auto' | 'none' | 'clean-logo'> =
           designId === 'royal-stamp-charter'
             ? 'wax-seal'
             : designId === 'crescent-guild'
@@ -1805,11 +1849,23 @@ export async function exportCardPng(
       ctx.lineWidth = 5;
       ctx.strokeRect(lx, 105, 112, 112);
 
-      ctx.fillStyle = theme.accentHex;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = `700 46px ${companyFontCanvas}`;
-      ctx.fillText(details.monogram, lx + 56, 163);
+      if (
+        (symbols.crestCenterMode === 'custom-image' || symbols.crestStyle === 'clean-logo') &&
+        customLogoImg
+      ) {
+        const natW = Math.max(1, customLogoImg.naturalWidth || customLogoImg.width || 90);
+        const natH = Math.max(1, customLogoImg.naturalHeight || customLogoImg.height || 90);
+        const fit = Math.min(90 / natW, 90 / natH);
+        const dw = natW * fit;
+        const dh = natH * fit;
+        ctx.drawImage(customLogoImg, lx + 56 - dw / 2, 161 - dh / 2, dw, dh);
+      } else {
+        ctx.fillStyle = theme.accentHex;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `700 46px ${companyFontCanvas}`;
+        ctx.fillText(details.monogram, lx + 56, 163);
+      }
 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';

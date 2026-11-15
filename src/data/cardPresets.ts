@@ -188,6 +188,7 @@ export const CREST_STYLE_OPTIONS: {
   { id: 'mughal-arch', label: 'Mughal Archway', note: 'Traditional pointed arch', category: 'Traditional' },
   { id: 'mughal-lotus-mandala', label: 'Mughal 16-Petal Lotus', note: 'Royal darbar lotus mandala', category: 'Traditional' },
   { id: 'crescent-star', label: 'Crescent & Star', note: 'Traditional ornate crescent', category: 'Traditional' },
+  { id: 'clean-logo', label: 'Clean Vector Logo', note: 'Frameless transparent canvas logo', category: 'System' },
   { id: 'none', label: 'Hide Crest', note: 'Pure typography only', category: 'System' },
 ];
 
@@ -261,6 +262,12 @@ export const DEFAULT_SYMBOLS_CONFIG: CardSymbolsConfig = {
   crestLiveSheen: true,
   customLogoDataUrl: '',
   customLogoFullColor: false,
+  customLogoVariant: 'full',
+  customLogoOffsetX: 0,
+  customLogoOffsetY: 0,
+  customLogoRotation: 0,
+  customLogoOpacity: 100,
+  customLogoFlipX: false,
   watermarkCrest: 'none',
   watermarkOpacity: 12,
   stampIcons: ['stamp-paper', 'round-seal', 'fountain-pen'],
@@ -773,3 +780,76 @@ export const CARD_FONT_THEMES: CardFontTheme[] = [
     defaultBodyId: 'lora',
   },
 ];
+
+function hexToRgbChannels(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '').trim();
+  if (clean.length === 3) {
+    return [
+      parseInt(clean[0] + clean[0], 16) || 0,
+      parseInt(clean[1] + clean[1], 16) || 0,
+      parseInt(clean[2] + clean[2], 16) || 0,
+    ];
+  }
+  if (clean.length !== 6) return [27, 67, 50];
+  return [
+    parseInt(clean.slice(0, 2), 16) || 0,
+    parseInt(clean.slice(2, 4), 16) || 0,
+    parseInt(clean.slice(4, 6), 16) || 0,
+  ];
+}
+
+function relativeLuminance(hex: string): number {
+  const [r, g, b] = hexToRgbChannels(hex).map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function shiftHex(hex: string, amount: number): string {
+  const [r, g, b] = hexToRgbChannels(hex).map((v) =>
+    Math.max(0, Math.min(255, Math.round(v + amount)))
+  );
+  return `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+}
+
+export function buildCardThemeFromBrandColors(
+  colors: {
+    primary: string;
+    secondary: string;
+    accent: string;
+    background: string;
+    text: string;
+  },
+  brandName: string
+): CardTheme {
+  const surfaceBg = colors.background || '#FAF9F6';
+  const isDark = relativeLuminance(surfaceBg) < 0.35;
+  const cardBgEndHex = isDark ? shiftHex(surfaceBg, -18) : shiftHex(surfaceBg, -14);
+  const accentHex = colors.accent || colors.primary || '#1B4332';
+  const accentHighlightHex = shiftHex(accentHex, isDark ? 42 : 28);
+  const accentMutedHex = colors.secondary || shiftHex(accentHex, -32);
+  const textPrimaryHex = colors.text || (isDark ? '#FBF8F0' : '#141413');
+  const textSecondaryHex = isDark ? shiftHex(textPrimaryHex, -45) : shiftHex(textPrimaryHex, 55);
+  const [ar, ag, ab] = hexToRgbChannels(accentHex);
+
+  return {
+    id: 'canvas-brand',
+    name: `${brandName} Brand Palette`,
+    finishNote: 'Synced live from Logo Maker colors',
+    surfaceBg,
+    surfaceGradient: `linear-gradient(135deg, ${surfaceBg} 0%, ${cardBgEndHex} 100%)`,
+    cardBgHex: surfaceBg,
+    cardBgEndHex,
+    creamPaperHex: isDark ? '#F7F5EE' : '#141413',
+    creamInkHex: isDark ? '#141413' : '#FAF7F0',
+    accentHex,
+    accentHighlightHex,
+    accentMutedHex,
+    foilGradient: `linear-gradient(135deg, ${accentMutedHex} 0%, ${accentHighlightHex} 50%, ${accentHex} 100%)`,
+    textPrimaryHex,
+    textSecondaryHex,
+    borderHex: `rgba(${ar}, ${ag}, ${ab}, 0.38)`,
+    isDark,
+  };
+}

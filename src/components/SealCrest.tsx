@@ -269,7 +269,7 @@ export interface SealCrestProps {
 
 export const LuxuryCrestSvg: React.FC<
   SealCrestProps & {
-    crestId: Exclude<CrestStyleId, 'auto' | 'none' | 'postage-stamp'>;
+    crestId: Exclude<CrestStyleId, 'auto' | 'none' | 'postage-stamp' | 'clean-logo'>;
   }
 > = ({
   crestId,
@@ -1010,6 +1010,17 @@ export const CrestPreviewThumb: React.FC<{
   }
   if (crestId === 'none') {
     return <span className="text-[10px] font-bold tracking-widest opacity-50">OFF</span>;
+  }
+  if (crestId === 'clean-logo') {
+    return customLogoDataUrl ? (
+      <img
+        src={customLogoDataUrl}
+        alt="Clean Canvas Logo"
+        className="h-9 w-9 object-contain"
+      />
+    ) : (
+      <span className="text-[10px] font-bold tracking-wider opacity-80">LOGO</span>
+    );
   }
   const effectiveId = crestId === 'auto' ? 'notary-rosette' : crestId;
   return (

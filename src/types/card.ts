@@ -10,7 +10,8 @@ export type CardThemeId =
   | 'obsidian-gold'
   | 'terracotta-ivory'
   | 'titanium-ice'
-  | 'ivory-crimson';
+  | 'ivory-crimson'
+  | 'canvas-brand';
 
 export type CardDesignId =
   | 'sovereign-stamp'
@@ -122,6 +123,7 @@ export type CrestStyleId =
   | 'chopard-wreath-crest'
   | 'double-diamond-atelier'
   | 'arch-pillar-seal'
+  | 'clean-logo'
   | 'none';
 
 export type CrestFinishMode =
@@ -189,6 +191,12 @@ export interface CardSymbolsConfig {
   crestLiveSheen: boolean;
   customLogoDataUrl: string;
   customLogoFullColor: boolean;
+  customLogoVariant?: 'full' | 'mark';
+  customLogoOffsetX?: number;
+  customLogoOffsetY?: number;
+  customLogoRotation?: number;
+  customLogoOpacity?: number;
+  customLogoFlipX?: boolean;
   watermarkCrest: CrestStyleId;
   watermarkOpacity: number;
   stampIcons: [CraftSymbolId, CraftSymbolId, CraftSymbolId];

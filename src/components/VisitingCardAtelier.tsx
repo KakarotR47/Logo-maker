@@ -8,9 +8,14 @@ import {
   FlipHorizontal2,
   MapPin,
   MessageCircle,
+  Move,
+  Palette,
+  Pencil,
   Phone,
   Pin,
   Printer,
+  RefreshCw,
+  RotateCcw,
   Sparkles,
   Upload,
   UserPlus,
@@ -24,7 +29,9 @@ import {
   DEFAULT_MAGIC_CONFIG,
   DEFAULT_SYMBOLS_CONFIG,
   DEFAULT_TYPOGRAPHY_MAP,
+  buildCardThemeFromBrandColors,
 } from '../data/cardPresets';
+import { useStudioLogo } from '../context/StudioLogoContext';
 import {
   CardBorderStyle,
   CardCornerStyle,
@@ -35,11 +42,10 @@ import {
   CardSymbolsConfig,
   CardThemeId,
   CardTypographyMap,
+  CrestStyleId,
   SavedCardPreset,
 } from '../types/card';
-import { LogoDocument } from '../types/logo';
 import { downloadVCard, exportCardPng } from '../utils/exportCard';
-import { buildCleanSvgString } from '../utils/svgExport';
 import { StudioCustomizer } from './StudioCustomizer';
 import {
   CardBackFace,
@@ -145,15 +151,20 @@ const CornerCutDiagram: React.FC<{ cornerId: CardCornerStyle; active: boolean }>
 };
 
 interface VisitingCardAtelierProps {
-  activeCanvasDoc: LogoDocument;
-  incomingLogoNonce: number;
+  incomingLogoNonce?: number;
 }
 
 export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
-  activeCanvasDoc,
-  incomingLogoNonce,
+  incomingLogoNonce = 0,
 }) => {
-  const [details, setDetails] = useState<CardDetails>(DEFAULT_CARD_DETAILS);
+  const studioLogo = useStudioLogo();
+
+  const [details, setDetails] = useState<CardDetails>(() => ({
+    ...DEFAULT_CARD_DETAILS,
+    companyName: studioLogo.brandName || DEFAULT_CARD_DETAILS.companyName,
+    monogram: studioLogo.monogram || DEFAULT_CARD_DETAILS.monogram,
+    tagline: studioLogo.tagline || DEFAULT_CARD_DETAILS.tagline,
+  }));
   const [activeDesignId, setActiveDesignId] = useState<CardDesignId>('sovereign-stamp');
   const [activeThemeId, setActiveThemeId] = useState<CardThemeId>('emerald-gold');
   const [activeBorderStyle, setActiveBorderStyle] =
@@ -163,7 +174,19 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
   const [cornerStyle, setCornerStyle] = useState<CardCornerStyle>('classic');
   const [typography, setTypography] =
     useState<CardTypographyMap>(DEFAULT_TYPOGRAPHY_MAP);
-  const [symbols, setSymbols] = useState<CardSymbolsConfig>(DEFAULT_SYMBOLS_CONFIG);
+  const [symbols, setSymbols] = useState<CardSymbolsConfig>(() => {
+    const initialLogo = studioLogo.logoSvgDataUrl;
+    if (initialLogo) {
+      return {
+        ...DEFAULT_SYMBOLS_CONFIG,
+        customLogoDataUrl: initialLogo,
+        customLogoFullColor: true,
+        crestCenterMode: 'custom-image',
+        crestStyle: 'clean-logo',
+      };
+    }
+    return DEFAULT_SYMBOLS_CONFIG;
+  });
   const [magic, setMagic] = useState<CardMagicConfig>(DEFAULT_MAGIC_CONFIG);
 
   const [designFilter, setDesignFilter] = useState<DesignFilter>('All');
@@ -174,6 +197,9 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [mobilePinned, setMobilePinned] = useState<boolean>(false);
   const [dbFeedback, setDbFeedback] = useState<string | null>(null);
+  const [autoSyncBrand, setAutoSyncBrand] = useState<boolean>(true);
+  const [isLogoSelected, setIsLogoSelected] = useState<boolean>(false);
+  const [lastSealStyle, setLastSealStyle] = useState<CrestStyleId>('notary-rosette');
 
   const [savedPresets, setSavedPresets] = useState<SavedCardPreset[]>(() => {
     try {
@@ -191,6 +217,14 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
   const hoverRafRef = useRef<number | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
   const copyTimerRef = useRef<number | null>(null);
+  const lastSyncedRevRef = useRef<number>(-1);
+  const justDraggedRef = useRef<boolean>(false);
+  const logoDragRef = useRef<{
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+  } | null>(null);
 
   const scheduleFeedbackClear = (ms: number) => {
     if (feedbackTimerRef.current !== null) {
@@ -216,31 +250,152 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
     };
   }, []);
 
-  // When user clicks "Send to Visiting Card" from Canvas Editor, import SVG logo onto card seal
+  // Remember the most recent framed seal so users can toggle cleanly between Frameless and Royal Seal
   useEffect(() => {
-    if (incomingLogoNonce === 0) return;
-    void applyCanvasLogoToCard();
-  }, [incomingLogoNonce]);
+    if (
+      symbols.crestStyle !== 'clean-logo' &&
+      symbols.crestStyle !== 'none' &&
+      symbols.crestStyle !== 'auto'
+    ) {
+      setLastSealStyle(symbols.crestStyle);
+    }
+  }, [symbols.crestStyle]);
 
-  const applyCanvasLogoToCard = async () => {
-    try {
-      const svgXml = await buildCleanSvgString(activeCanvasDoc, {
-        transparentBackground: true,
-        outlineText: true,
-      });
-      const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgXml)}`;
+  const placeSavedLogoOnCard = (opts?: {
+    syncText?: boolean;
+    variantOverride?: 'full' | 'mark';
+    feedback?: string;
+    logoOverride?: string;
+    markOverride?: string;
+  }) => {
+    const variant = opts?.variantOverride ?? symbols.customLogoVariant ?? 'full';
+    const fullUrl = opts?.logoOverride ?? studioLogo.logoSvgDataUrl;
+    const markUrl = opts?.markOverride ?? studioLogo.markSvgDataUrl;
+    const targetLogoUrl = variant === 'mark' ? markUrl || fullUrl : fullUrl;
+
+    if (targetLogoUrl) {
       setSymbols((prev) => ({
         ...prev,
-        customLogoDataUrl: encoded,
-        customLogoFullColor: true,
+        customLogoDataUrl: targetLogoUrl,
+        customLogoFullColor: prev.customLogoFullColor ?? true,
+        customLogoVariant: variant,
         crestCenterMode: 'custom-image',
-        crestStyle: prev.crestStyle === 'none' ? 'notary-rosette' : prev.crestStyle,
+        crestStyle:
+          prev.crestStyle === 'none' || prev.crestStyle === 'auto'
+            ? 'clean-logo'
+            : prev.crestStyle,
       }));
-      setDbFeedback('Canvas logo stamped onto your visiting card seal.');
-      scheduleFeedbackClear(2600);
-    } catch {
-      // Ignore error
     }
+
+    if (opts?.syncText ?? autoSyncBrand) {
+      setDetails((prev) => ({
+        ...prev,
+        companyName: studioLogo.brandName || prev.companyName,
+        monogram: studioLogo.monogram || prev.monogram,
+        tagline: studioLogo.tagline || prev.tagline,
+      }));
+    }
+
+    if (opts?.feedback) {
+      setDbFeedback(opts.feedback);
+      scheduleFeedbackClear(2600);
+    }
+  };
+
+  // Auto-sync whenever Canvas Logo updates or Visiting Card tab mounts with a fresh snapshot
+  useEffect(() => {
+    if (!studioLogo.logoSvgDataUrl) return;
+    if (!autoSyncBrand && lastSyncedRevRef.current !== -1) return;
+    if (lastSyncedRevRef.current === studioLogo.revision) return;
+
+    lastSyncedRevRef.current = studioLogo.revision;
+    placeSavedLogoOnCard({ syncText: autoSyncBrand });
+  }, [
+    studioLogo.revision,
+    studioLogo.logoSvgDataUrl,
+    studioLogo.markSvgDataUrl,
+    studioLogo.brandName,
+    studioLogo.monogram,
+    studioLogo.tagline,
+    autoSyncBrand,
+  ]);
+
+  // Explicit "Put Logo on Card" button from Logo Canvas Editor
+  useEffect(() => {
+    if (incomingLogoNonce === 0) return;
+    let active = true;
+    void (async () => {
+      const snap = studioLogo.logoSvgDataUrl
+        ? { logoSvgDataUrl: studioLogo.logoSvgDataUrl, markSvgDataUrl: studioLogo.markSvgDataUrl }
+        : await studioLogo.flushSnapshotNow();
+      if (!active) return;
+      placeSavedLogoOnCard({
+        syncText: true,
+        logoOverride: snap.logoSvgDataUrl,
+        markOverride: snap.markSvgDataUrl,
+        feedback: `Canvas logo for "${studioLogo.brandName}" placed onto your visiting card.`,
+      });
+      setIsLogoSelected(true);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [incomingLogoNonce]);
+
+  const handleForceSyncFromCanvas = async () => {
+    const snap = await studioLogo.flushSnapshotNow();
+    placeSavedLogoOnCard({
+      syncText: true,
+      logoOverride: snap.logoSvgDataUrl,
+      markOverride: snap.markSvgDataUrl,
+      feedback: `Synced "${studioLogo.brandName}" logo & brand metadata from Canvas.`,
+    });
+  };
+
+  const handleLogoPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsLogoSelected(true);
+    logoDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: symbols.customLogoOffsetX ?? 0,
+      origY: symbols.customLogoOffsetY ?? 0,
+    };
+
+    const handleMove = (ev: PointerEvent) => {
+      const drag = logoDragRef.current;
+      const stage = cardStageRef.current;
+      if (!drag || !stage) return;
+      const rect = stage.getBoundingClientRect();
+      const factor = 680 / Math.max(280, rect.width);
+      const dx = (ev.clientX - drag.startX) * factor;
+      const dy = (ev.clientY - drag.startY) * factor;
+      if (Math.abs(ev.clientX - drag.startX) > 3 || Math.abs(ev.clientY - drag.startY) > 3) {
+        justDraggedRef.current = true;
+      }
+      const nextX = Math.max(-150, Math.min(150, Math.round(drag.origX + dx)));
+      const nextY = Math.max(-95, Math.min(95, Math.round(drag.origY + dy)));
+      setSymbols((prev) => ({
+        ...prev,
+        customLogoOffsetX: nextX,
+        customLogoOffsetY: nextY,
+      }));
+    };
+
+    const handleUp = () => {
+      logoDragRef.current = null;
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      if (justDraggedRef.current) {
+        window.setTimeout(() => {
+          justDraggedRef.current = false;
+        }, 60);
+      }
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
   };
 
   useEffect(() => {
@@ -275,9 +430,19 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
     return () => cancelAnimationFrame(frameId);
   }, [magic.autoShowcase]);
 
+  const canvasBrandTheme = useMemo(
+    () => buildCardThemeFromBrandColors(studioLogo.colors, studioLogo.brandName),
+    [studioLogo.colors, studioLogo.brandName]
+  );
+
+  const allThemes = useMemo(
+    () => [canvasBrandTheme, ...CARD_THEMES],
+    [canvasBrandTheme]
+  );
+
   const activeTheme = useMemo(
-    () => CARD_THEMES.find((t) => t.id === activeThemeId) ?? CARD_THEMES[0],
-    [activeThemeId]
+    () => allThemes.find((t) => t.id === activeThemeId) ?? CARD_THEMES[0],
+    [allThemes, activeThemeId]
   );
 
   const activeDesign = useMemo(
@@ -313,9 +478,41 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
     recommendedTheme: CardThemeId,
     recommendedBorder: CardBorderStyle
   ) => {
+    const designName = CARD_DESIGNS.find((d) => d.id === designId)?.name ?? 'Template';
     setActiveDesignId(designId);
     setActiveThemeId(recommendedTheme);
     setActiveBorderStyle(recommendedBorder);
+
+    // Automatically place saved Canvas logo onto the visiting card canvas when selecting any template
+    const variant = symbols.customLogoVariant ?? 'full';
+    const targetLogoUrl =
+      variant === 'mark'
+        ? studioLogo.markSvgDataUrl || studioLogo.logoSvgDataUrl
+        : studioLogo.logoSvgDataUrl;
+
+    if (targetLogoUrl) {
+      setSymbols((prev) => ({
+        ...prev,
+        customLogoDataUrl: targetLogoUrl,
+        customLogoFullColor: prev.customLogoFullColor ?? true,
+        crestCenterMode: 'custom-image',
+        crestStyle:
+          prev.crestStyle === 'none' || prev.crestStyle === 'auto'
+            ? 'clean-logo'
+            : prev.crestStyle,
+      }));
+      if (autoSyncBrand) {
+        setDetails((prev) => ({
+          ...prev,
+          companyName: studioLogo.brandName || prev.companyName,
+          monogram: studioLogo.monogram || prev.monogram,
+          tagline: studioLogo.tagline || prev.tagline,
+        }));
+      }
+      setIsLogoSelected(true);
+      setDbFeedback(`${designName} loaded with your Canvas logo placed automatically.`);
+      scheduleFeedbackClear(2600);
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -600,7 +797,14 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
                 ref={cardStageRef}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={handleMouseLeave}
-                onClick={() => setSide((s) => (s === 'front' ? 'back' : 'front'))}
+                onClick={() => {
+                  if (justDraggedRef.current) return;
+                  if (isLogoSelected) {
+                    setIsLogoSelected(false);
+                    return;
+                  }
+                  setSide((s) => (s === 'front' ? 'back' : 'front'));
+                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
@@ -609,7 +813,7 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
                     setSide((s) => (s === 'front' ? 'back' : 'front'));
                   }
                 }}
-                aria-label="Interactive visiting card preview. Click to flip between front and back."
+                aria-label="Interactive visiting card preview. Click to flip between front and back, or drag your logo directly on the front."
                 className="perspective-stage mx-auto w-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#141413] focus-visible:ring-offset-4 rounded-xl"
               >
                 <div
@@ -636,6 +840,9 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
                         formatPhone={phoneFormatter}
                         showPrintGuides={showPrintGuides}
                         glarePos={glare}
+                        interactiveLogo={side === 'front' && !showPrintGuides}
+                        isLogoSelected={isLogoSelected}
+                        onLogoPointerDown={handleLogoPointerDown}
                       />
                     </div>
 
@@ -783,12 +990,281 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
                   Save .vcf
                 </button>
               </div>
+
+              {/* LIVE ON-CARD LOGO EDITOR PANEL */}
+              {(symbols.customLogoDataUrl || studioLogo.logoSvgDataUrl) && (
+                <div className="mt-4 rounded-xl border border-[#D5D0C3] bg-white/95 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-8 w-8 rounded-lg border border-[#E2DFD7] bg-[#FAF9F6] p-1 flex items-center justify-center shrink-0">
+                        <img
+                          src={symbols.customLogoDataUrl || studioLogo.logoSvgDataUrl}
+                          alt={studioLogo.brandName}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-[#141413] flex items-center gap-1 truncate">
+                          <Move className="h-3 w-3 text-[#7E632B] shrink-0" />
+                          Logo on Card (Drag to Move)
+                        </p>
+                        <p className="text-[10px] text-[#6B675E] truncate">
+                          {autoSyncBrand ? 'Auto-synced with Logo Canvas' : 'Custom card logo overrides active'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={studioLogo.onJumpToLogoEditor}
+                      className="inline-flex items-center gap-1 rounded-md border border-[#D2CEC2] bg-[#FAF9F6] px-2 py-1 text-[10px] font-semibold text-[#141413] hover:bg-[#EFECE4] cursor-pointer shrink-0"
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                      Edit SVG
+                    </button>
+                  </div>
+
+                  {/* Framing + Logo Variant + Color Mode */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="inline-flex rounded-md bg-[#EAE7DF] p-0.5 text-[10px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSymbols((prev) => ({
+                            ...prev,
+                            crestStyle: 'clean-logo',
+                            crestCenterMode: 'custom-image',
+                            customLogoDataUrl:
+                              prev.customLogoDataUrl || studioLogo.logoSvgDataUrl,
+                          }))
+                        }
+                        className={`rounded px-2 py-1 cursor-pointer ${
+                          symbols.crestStyle === 'clean-logo'
+                            ? 'bg-white text-[#141413] shadow-xs'
+                            : 'text-[#55524B]'
+                        }`}
+                      >
+                        Frameless
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSymbols((prev) => ({
+                            ...prev,
+                            crestStyle: lastSealStyle,
+                            crestCenterMode: 'custom-image',
+                            customLogoDataUrl:
+                              prev.customLogoDataUrl || studioLogo.logoSvgDataUrl,
+                          }))
+                        }
+                        className={`rounded px-2 py-1 cursor-pointer ${
+                          symbols.crestStyle !== 'clean-logo' && symbols.crestStyle !== 'none'
+                            ? 'bg-white text-[#141413] shadow-xs'
+                            : 'text-[#55524B]'
+                        }`}
+                      >
+                        Seal Frame
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSymbols((prev) => ({ ...prev, crestStyle: 'none' }))
+                        }
+                        className={`rounded px-2 py-1 cursor-pointer ${
+                          symbols.crestStyle === 'none'
+                            ? 'bg-white text-[#141413] shadow-xs'
+                            : 'text-[#55524B]'
+                        }`}
+                      >
+                        Hide
+                      </button>
+                    </div>
+
+                    <div className="inline-flex rounded-md bg-[#EAE7DF] p-0.5 text-[10px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          placeSavedLogoOnCard({ variantOverride: 'full', syncText: false })
+                        }
+                        className={`rounded px-2 py-1 cursor-pointer ${
+                          (symbols.customLogoVariant ?? 'full') === 'full'
+                            ? 'bg-white text-[#141413] shadow-xs'
+                            : 'text-[#55524B]'
+                        }`}
+                      >
+                        Full Logo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          placeSavedLogoOnCard({ variantOverride: 'mark', syncText: false })
+                        }
+                        className={`rounded px-2 py-1 cursor-pointer ${
+                          symbols.customLogoVariant === 'mark'
+                            ? 'bg-white text-[#141413] shadow-xs'
+                            : 'text-[#55524B]'
+                        }`}
+                      >
+                        Mark Only
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSymbols((prev) => ({
+                          ...prev,
+                          customLogoFullColor: !(prev.customLogoFullColor ?? true),
+                        }))
+                      }
+                      className={`rounded-md border px-2 py-1 text-[10px] font-semibold cursor-pointer ${
+                        symbols.customLogoFullColor ?? true
+                          ? 'border-[#141413] bg-[#141413] text-white'
+                          : 'border-[#D2CEC2] bg-[#FAF9F6] text-[#141413]'
+                      }`}
+                    >
+                      {symbols.customLogoFullColor ?? true ? 'Original Colors' : 'Foil Tint'}
+                    </button>
+                  </div>
+
+                  {/* Size, Rotate, Opacity Sliders */}
+                  <div className="grid grid-cols-3 gap-2 pt-0.5">
+                    <div>
+                      <div className="flex justify-between text-[10px] font-semibold text-[#55524B]">
+                        <span>Size</span>
+                        <span className="font-mono-num">{Math.round((symbols.crestScale ?? 1) * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.45}
+                        max={2.0}
+                        step={0.05}
+                        value={symbols.crestScale ?? 1}
+                        onChange={(e) =>
+                          setSymbols((prev) => ({ ...prev, crestScale: parseFloat(e.target.value) }))
+                        }
+                        className="mt-1 w-full accent-[#141413] cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] font-semibold text-[#55524B]">
+                        <span>Rotate</span>
+                        <span className="font-mono-num">{Math.round(symbols.customLogoRotation ?? 0)}°</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        step={5}
+                        value={symbols.customLogoRotation ?? 0}
+                        onChange={(e) =>
+                          setSymbols((prev) => ({ ...prev, customLogoRotation: parseInt(e.target.value, 10) }))
+                        }
+                        className="mt-1 w-full accent-[#141413] cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] font-semibold text-[#55524B]">
+                        <span>Opacity</span>
+                        <span className="font-mono-num">{symbols.customLogoOpacity ?? 100}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={20}
+                        max={100}
+                        step={5}
+                        value={symbols.customLogoOpacity ?? 100}
+                        onChange={(e) =>
+                          setSymbols((prev) => ({ ...prev, customLogoOpacity: parseInt(e.target.value, 10) }))
+                        }
+                        className="mt-1 w-full accent-[#141413] cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Quick inline brand text + Push back to Canvas + Reset Transform */}
+                  <div className="grid grid-cols-2 gap-1.5 border-t border-[#EAE7DF] pt-2.5">
+                    <input
+                      type="text"
+                      value={details.companyName}
+                      onChange={(e) =>
+                        setDetails((prev) => ({ ...prev, companyName: e.target.value }))
+                      }
+                      placeholder="Brand Name"
+                      className="rounded-md border border-[#D8D4C9] bg-[#FAF9F6] px-2 py-1 text-[11px] font-semibold text-[#141413] focus:border-[#141413] focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={details.tagline}
+                      onChange={(e) =>
+                        setDetails((prev) => ({ ...prev, tagline: e.target.value }))
+                      }
+                      placeholder="Tagline"
+                      className="rounded-md border border-[#D8D4C9] bg-[#FAF9F6] px-2 py-1 text-[11px] text-[#141413] focus:border-[#141413] focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-semibold">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSymbols((prev) => ({
+                            ...prev,
+                            customLogoFlipX: !(prev.customLogoFlipX ?? false),
+                          }))
+                        }
+                        className={`rounded border px-2 py-1 cursor-pointer ${
+                          symbols.customLogoFlipX
+                            ? 'border-[#141413] bg-[#141413] text-white'
+                            : 'border-[#D8D4C9] bg-[#FAF9F6] text-[#141413]'
+                        }`}
+                      >
+                        Flip H
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSymbols((prev) => ({
+                            ...prev,
+                            crestScale: 1,
+                            customLogoOffsetX: 0,
+                            customLogoOffsetY: 0,
+                            customLogoRotation: 0,
+                            customLogoOpacity: 100,
+                            customLogoFlipX: false,
+                          }))
+                        }
+                        className="inline-flex items-center gap-1 rounded border border-[#D8D4C9] bg-[#FAF9F6] px-2 py-1 text-[#141413] hover:bg-[#EFECE4] cursor-pointer"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        Reset Pos
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        studioLogo.onUpdateCanvasBrandMeta({
+                          brandName: details.companyName,
+                          tagline: details.tagline,
+                        });
+                        setDbFeedback('Updated brand text in Logo Canvas too.');
+                        scheduleFeedbackClear(2400);
+                      }}
+                      className="rounded bg-[#1B4332] px-2 py-1 text-white hover:bg-[#143527] cursor-pointer"
+                    >
+                      Sync Text to Canvas
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </aside>
 
           {/* SCROLLING EDITOR WORKSPACE */}
           <div className="order-2 lg:order-1 lg:col-span-7 min-w-0 space-y-12">
-            {/* Editorial Header + Database Upload/Backup + Canvas Logo Sync */}
+            {/* Editorial Header + Synced Canvas Logo Banner + DB Controls */}
             <section className="border-b border-[#E2DFD7] pb-6 space-y-4">
               <div>
                 <p className="text-xs font-semibold tracking-[0.18em] uppercase text-[#7E632B]">
@@ -798,18 +1274,95 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
                   {details.companyName}
                 </h1>
                 <p className="mt-2 text-sm leading-relaxed text-[#55524B] max-w-2xl">
-                  All 20 luxury card designs, 12 foil palettes, 8 border foils, 5 corner cuts, and 24 royal seals are loaded. Upload or export saved card databases, or stamp your current Logo Canvas vector straight onto your card.
+                  Your Logo Canvas artwork, brand name, tagline, and brand colors automatically connect here. Pick any of the 20 card templates below and click or drag your logo directly on the card proof.
                 </p>
+              </div>
+
+              {/* Connected Canvas Brand Card */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#DFDBD0] bg-[#FAF9F6] p-3.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-12 w-12 rounded-lg border border-[#E2DFD7] bg-white p-1.5 flex items-center justify-center shrink-0">
+                    {studioLogo.logoSvgDataUrl ? (
+                      <img
+                        src={studioLogo.logoSvgDataUrl}
+                        alt={studioLogo.brandName}
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-[#7A756B]">
+                        {studioLogo.monogram}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-[#141413] truncate">
+                        {studioLogo.brandName}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {[
+                          studioLogo.colors.primary,
+                          studioLogo.colors.accent,
+                          studioLogo.colors.secondary,
+                        ].map((hex, idx) => (
+                          <span
+                            key={idx}
+                            className="h-3 w-3 rounded-full border border-black/15"
+                            style={{ backgroundColor: hex }}
+                            title={hex}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#6B675E] truncate">
+                      {studioLogo.tagline || 'Connected live from Logo Maker canvas'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <label className="inline-flex items-center gap-1.5 rounded-lg border border-[#D8D4C9] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#141413] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoSyncBrand}
+                      onChange={(e) => setAutoSyncBrand(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded accent-[#1B4332]"
+                    />
+                    Auto-Sync
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveThemeId('canvas-brand')}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer ${
+                      activeThemeId === 'canvas-brand'
+                        ? 'bg-[#141413] text-white'
+                        : 'border border-[#D8D4C9] bg-white text-[#141413] hover:bg-[#EFECE4]'
+                    }`}
+                  >
+                    <Palette className="h-3.5 w-3.5" />
+                    Match Brand Colors
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleForceSyncFromCanvas}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#1B4332] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#143527] transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Place Canvas Logo
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
-                  onClick={applyCanvasLogoToCard}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1B4332] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#143527] transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  onClick={studioLogo.onJumpToLogoEditor}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#141413] bg-[#141413] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#2C2B28] transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  Stamp Current Canvas Logo onto Card
+                  Edit Logo on Canvas
                 </button>
 
                 <input
@@ -983,7 +1536,7 @@ export const VisitingCardAtelier: React.FC<VisitingCardAtelierProps> = ({
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
-                  {CARD_THEMES.map((theme) => {
+                  {allThemes.map((theme) => {
                     const isSelected = theme.id === activeTheme.id;
                     return (
                       <button

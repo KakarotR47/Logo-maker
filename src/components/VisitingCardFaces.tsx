@@ -45,6 +45,9 @@ interface VisitingCardFaceProps {
   formatPhone: (phone: string) => string;
   showPrintGuides?: boolean;
   glarePos?: { x: number; y: number };
+  interactiveLogo?: boolean;
+  isLogoSelected?: boolean;
+  onLogoPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
 }
 
 export function formatPakistaniPhone(raw: string): string {
@@ -412,11 +415,12 @@ const CanvasWatermarkOverlay: React.FC<{
   const wm = symbols.watermarkCrest;
   if (!wm || wm === 'none') return null;
 
-  const resolvedId: Exclude<CrestStyleId, 'auto' | 'none' | 'postage-stamp'> =
-    wm === 'auto' || wm === 'postage-stamp'
+  const resolvedId: Exclude<CrestStyleId, 'auto' | 'none' | 'postage-stamp' | 'clean-logo'> =
+    wm === 'auto' || wm === 'postage-stamp' || wm === 'clean-logo'
       ? symbols.crestStyle !== 'auto' &&
         symbols.crestStyle !== 'none' &&
-        symbols.crestStyle !== 'postage-stamp'
+        symbols.crestStyle !== 'postage-stamp' &&
+        symbols.crestStyle !== 'clean-logo'
         ? symbols.crestStyle
         : 'justice-scales-seal'
       : wm;
@@ -554,12 +558,15 @@ const ServiceBulletMarker: React.FC<{
 };
 
 const DynamicCrest: React.FC<{
-  designDefault: Exclude<CrestStyleId, 'auto' | 'none'>;
+  designDefault: Exclude<CrestStyleId, 'auto' | 'none' | 'clean-logo'>;
   symbols: CardSymbolsConfig;
   theme: CardTheme;
   details: CardDetails;
   displayFont: string;
   sizeClass?: string;
+  interactiveLogo?: boolean;
+  isLogoSelected?: boolean;
+  onLogoPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
 }> = ({
   designDefault,
   symbols,
@@ -567,18 +574,79 @@ const DynamicCrest: React.FC<{
   details,
   displayFont,
   sizeClass = 'h-14 w-14 sm:h-16 sm:w-16',
+  interactiveLogo = false,
+  isLogoSelected = false,
+  onLogoPointerDown,
 }) => {
   const effective = symbols.crestStyle === 'auto' ? designDefault : symbols.crestStyle;
   if (effective === 'none') return null;
 
   const brandMain = details.companyName.split(/stamp vendor/i)[0].trim() || details.companyName;
   const scale = symbols.crestScale ?? 1;
-  const scaleStyle: React.CSSProperties =
-    scale !== 1 ? { transform: `scale(${scale})`, transformOrigin: 'center' } : {};
+  const offsetX = symbols.customLogoOffsetX ?? 0;
+  const offsetY = symbols.customLogoOffsetY ?? 0;
+  const rotation = symbols.customLogoRotation ?? 0;
+  const flipX = symbols.customLogoFlipX ? -1 : 1;
+  const opacity = Math.min(1, Math.max(0.15, (symbols.customLogoOpacity ?? 100) / 100));
+
+  const hasTransform =
+    scale !== 1 || offsetX !== 0 || offsetY !== 0 || rotation !== 0 || symbols.customLogoFlipX;
+
+  const transformStyle: React.CSSProperties = {
+    ...(hasTransform
+      ? {
+          transform: `translate(${offsetX}px, ${offsetY}px) rotate(${rotation}deg) scale(${scale * flipX}, ${scale})`,
+          transformOrigin: 'center',
+        }
+      : {}),
+    opacity,
+  };
+
+  const interactiveProps = interactiveLogo
+    ? {
+        onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+          e.stopPropagation();
+          onLogoPointerDown?.(e);
+        },
+        onClick: (e: React.MouseEvent<HTMLDivElement>) => {
+          e.stopPropagation();
+        },
+        title: 'Click & drag to reposition logo on card',
+        className: `relative touch-none select-none cursor-grab active:cursor-grabbing rounded-lg transition-shadow ${
+          isLogoSelected
+            ? 'ring-2 ring-amber-400/95 ring-offset-2 ring-offset-transparent bg-black/5'
+            : 'hover:ring-1 hover:ring-amber-300/70'
+        }`,
+      }
+    : {};
+
+  if (effective === 'clean-logo') {
+    if (!symbols.customLogoDataUrl) return null;
+    const isFullColor = symbols.customLogoFullColor ?? true;
+    return (
+      <div style={transformStyle} {...interactiveProps}>
+        <img
+          src={symbols.customLogoDataUrl}
+          alt={details.companyName}
+          draggable={false}
+          className={`${sizeClass} min-w-[64px] max-w-[140px] object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.28)]`}
+          style={
+            isFullColor
+              ? undefined
+              : {
+                  filter: theme.isDark
+                    ? 'brightness(0) invert(0.92) sepia(0.35) saturate(2.4) hue-rotate(6deg)'
+                    : 'brightness(0) opacity(0.88)',
+                }
+          }
+        />
+      </div>
+    );
+  }
 
   if (effective === 'postage-stamp') {
     return (
-      <div style={scaleStyle}>
+      <div style={transformStyle} {...interactiveProps}>
         <PostageStampEmblem
           goldColor={theme.accentHex}
           paperColor={theme.isDark ? theme.creamPaperHex : '#FAF7F0'}
@@ -597,7 +665,7 @@ const DynamicCrest: React.FC<{
   }
 
   return (
-    <div style={scaleStyle}>
+    <div style={transformStyle} {...interactiveProps}>
       <LuxuryCrestSvg
         crestId={effective}
         accentColor={theme.accentHex}
@@ -692,6 +760,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
   formatPhone,
   showPrintGuides = false,
   glarePos,
+  interactiveLogo = false,
+  isLogoSelected = false,
+  onLogoPointerDown,
 }) => {
   const { main: brandMain, role: brandRole } = splitBrandName(details.companyName);
   const brandWords = brandMain.split(/\s+/);
@@ -747,6 +818,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
                 details={details}
                 displayFont={companyFontCss}
                 sizeClass="w-24 h-24 sm:w-28 sm:h-28"
+                interactiveLogo={interactiveLogo}
+                isLogoSelected={isLogoSelected}
+                onLogoPointerDown={onLogoPointerDown}
               />
             </div>
           )}
@@ -835,6 +909,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
                 details={details}
                 displayFont={companyFontCss}
                 sizeClass="h-12 w-12 sm:h-14 sm:w-14 shrink-0"
+                interactiveLogo={interactiveLogo}
+                isLogoSelected={isLogoSelected}
+                onLogoPointerDown={onLogoPointerDown}
               />
               <div className="text-left">
                 <h2 className="font-bold leading-tight" style={slotStyle(typography.companyName, 20, 27, theme.textPrimaryHex, theme)}>
@@ -917,6 +994,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
               details={details}
               displayFont={companyFontCss}
               sizeClass="h-14 w-14 sm:h-16 sm:w-16 shrink-0"
+              interactiveLogo={interactiveLogo}
+              isLogoSelected={isLogoSelected}
+              onLogoPointerDown={onLogoPointerDown}
             />
           </div>
 
@@ -979,6 +1059,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
                 details={details}
                 displayFont={companyFontCss}
                 sizeClass="h-20 w-20 sm:h-24 sm:w-24"
+                interactiveLogo={interactiveLogo}
+                isLogoSelected={isLogoSelected}
+                onLogoPointerDown={onLogoPointerDown}
               />
             </div>
           )}
@@ -1081,6 +1164,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
               details={details}
               displayFont={companyFontCss}
               sizeClass="h-14 w-14 sm:h-16 sm:w-16 shrink-0"
+              interactiveLogo={interactiveLogo}
+              isLogoSelected={isLogoSelected}
+              onLogoPointerDown={onLogoPointerDown}
             />
             <div className="min-w-0 flex-1">
               <p className="font-semibold truncate" style={slotStyle(typography.subtitle, 8.5, 10, theme.accentHex, theme)}>
@@ -1136,6 +1222,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
               details={details}
               displayFont={companyFontCss}
               sizeClass="h-13 w-13 sm:h-15 sm:w-15"
+              interactiveLogo={interactiveLogo}
+              isLogoSelected={isLogoSelected}
+              onLogoPointerDown={onLogoPointerDown}
             />
             <div className="text-right">
               <p className="font-semibold" style={slotStyle(typography.subtitle, 8.5, 10, theme.accentHex, theme)}>
@@ -1197,6 +1286,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
               details={details}
               displayFont={companyFontCss}
               sizeClass="h-11 w-11 sm:h-12 sm:w-12"
+              interactiveLogo={interactiveLogo}
+              isLogoSelected={isLogoSelected}
+              onLogoPointerDown={onLogoPointerDown}
             />
             <h2
               className="mt-2 font-bold"
@@ -1260,14 +1352,30 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
             <span className="font-semibold" style={slotStyle(typography.subtitle, 8.5, 9.5, theme.accentMutedHex, theme)}>
               KARACHI
             </span>
-            <div
-              className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-lg"
-              style={{ border: `1.5px solid ${theme.accentHex}` }}
-            >
-              <span className="text-4xl sm:text-[42px] font-bold tracking-wider" style={{ fontFamily: companyFontCss, color: theme.accentHex }}>
-                {details.monogram}
-              </span>
-            </div>
+            {(symbols.crestStyle === 'clean-logo' || symbols.crestCenterMode === 'custom-image') && symbols.customLogoDataUrl ? (
+              <div className="flex items-center justify-center">
+                <DynamicCrest
+                  designDefault="notary-rosette"
+                  symbols={symbols}
+                  theme={theme}
+                  details={details}
+                  displayFont={companyFontCss}
+                  sizeClass="h-20 w-20 sm:h-24 sm:w-24"
+                  interactiveLogo={interactiveLogo}
+                  isLogoSelected={isLogoSelected}
+                  onLogoPointerDown={onLogoPointerDown}
+                />
+              </div>
+            ) : (
+              <div
+                className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-lg"
+                style={{ border: `1.5px solid ${theme.accentHex}` }}
+              >
+                <span className="text-4xl sm:text-[42px] font-bold tracking-wider" style={{ fontFamily: companyFontCss, color: theme.accentHex }}>
+                  {details.monogram}
+                </span>
+              </div>
+            )}
             <span className="font-semibold" style={slotStyle(typography.badge, 8.5, 10, theme.accentHex, theme)}>
               {details.cardLabel}
             </span>
@@ -1336,6 +1444,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
               details={details}
               displayFont={companyFontCss}
               sizeClass="h-12 w-12"
+              interactiveLogo={interactiveLogo}
+              isLogoSelected={isLogoSelected}
+              onLogoPointerDown={onLogoPointerDown}
             />
             <div className="text-center">
               <p className="text-[8.5px] font-semibold tracking-[0.22em] uppercase" style={{ color: spineAccent }}>SITE</p>
@@ -1412,6 +1523,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
                 details={details}
                 displayFont={companyFontCss}
                 sizeClass="h-20 w-20 sm:h-24 sm:w-24"
+                interactiveLogo={interactiveLogo}
+                isLogoSelected={isLogoSelected}
+                onLogoPointerDown={onLogoPointerDown}
               />
               {designId === 'art-deco-gilded' && (
                 <span className="font-semibold" style={slotStyle(typography.badge, 8, 9.5, theme.accentMutedHex, theme)}>
@@ -1494,6 +1608,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
               details={details}
               displayFont={companyFontCss}
               sizeClass="h-12 w-12 sm:h-14 sm:w-14 shrink-0"
+              interactiveLogo={interactiveLogo}
+              isLogoSelected={isLogoSelected}
+              onLogoPointerDown={onLogoPointerDown}
             />
           </div>
 
@@ -1543,16 +1660,33 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
         <PrintCropMarks visible={showPrintGuides} />
 
         <div className="relative z-10 flex h-full flex-col justify-between px-8 py-6 sm:px-10 sm:py-7">
-          <div className="pr-16">
-            <p className="font-semibold" style={slotStyle(typography.subtitle, 8.5, 10, theme.accentHex, theme)}>
-              {details.subtitle}
-            </p>
-            <h2 className="mt-1.5 font-bold leading-tight" style={slotStyle(typography.companyName, 22, 30, theme.textPrimaryHex, theme)}>
-              {details.companyName}
-            </h2>
-            <p className="mt-1.5" style={slotStyle(typography.tagline, 11, 13, theme.textSecondaryHex, theme)}>
-              {details.tagline}
-            </p>
+          <div className="flex items-start justify-between gap-4 pr-14">
+            <div className="min-w-0">
+              <p className="font-semibold" style={slotStyle(typography.subtitle, 8.5, 10, theme.accentHex, theme)}>
+                {details.subtitle}
+              </p>
+              <h2 className="mt-1.5 font-bold leading-tight" style={slotStyle(typography.companyName, 22, 30, theme.textPrimaryHex, theme)}>
+                {details.companyName}
+              </h2>
+              <p className="mt-1.5" style={slotStyle(typography.tagline, 11, 13, theme.textSecondaryHex, theme)}>
+                {details.tagline}
+              </p>
+            </div>
+            {(symbols.crestStyle === 'clean-logo' || symbols.crestCenterMode === 'custom-image') && symbols.customLogoDataUrl && (
+              <div className="shrink-0">
+                <DynamicCrest
+                  designDefault="notary-rosette"
+                  symbols={symbols}
+                  theme={theme}
+                  details={details}
+                  displayFont={companyFontCss}
+                  sizeClass="h-14 w-14 sm:h-16 sm:w-16"
+                  interactiveLogo={interactiveLogo}
+                  isLogoSelected={isLogoSelected}
+                  onLogoPointerDown={onLogoPointerDown}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-3">
@@ -1625,6 +1759,9 @@ export const CardFrontFace: React.FC<VisitingCardFaceProps> = ({
             details={details}
             displayFont={companyFontCss}
             sizeClass="h-13 w-13 sm:h-16 sm:w-16 shrink-0"
+            interactiveLogo={interactiveLogo}
+            isLogoSelected={isLogoSelected}
+            onLogoPointerDown={onLogoPointerDown}
           />
         </div>
 
@@ -1771,15 +1908,23 @@ export const CardBackFace: React.FC<VisitingCardFaceProps> = ({
 
             <div className="relative z-10 flex items-center gap-3">
               <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border-2"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border-2 overflow-hidden"
                 style={{
                   backgroundColor: theme.isDark ? theme.cardBgHex : '#171614',
                   borderColor: theme.accentHex,
                 }}
               >
-                <span className="text-sm font-bold" style={{ fontFamily: companyFontCss, color: theme.accentHex }}>
-                  {details.monogram}
-                </span>
+                {symbols.customLogoDataUrl && (symbols.crestStyle === 'clean-logo' || symbols.crestCenterMode === 'custom-image') ? (
+                  <img
+                    src={symbols.customLogoDataUrl}
+                    alt={details.companyName}
+                    className="h-7 w-7 object-contain"
+                  />
+                ) : (
+                  <span className="text-sm font-bold" style={{ fontFamily: companyFontCss, color: theme.accentHex }}>
+                    {details.monogram}
+                  </span>
+                )}
               </div>
               <div className="min-w-0">
                 <p className="font-bold leading-none truncate" style={slotStyle(typography.companyName, 14, 18, lightSideInk, theme, true)}>

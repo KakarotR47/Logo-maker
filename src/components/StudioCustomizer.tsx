@@ -582,6 +582,26 @@ export const StudioCustomizer: React.FC<StudioCustomizerProps> = ({
                     <span className="text-xs font-semibold tracking-widest text-white/50">
                       CREST HIDDEN
                     </span>
+                  ) : symbols.crestStyle === 'clean-logo' ? (
+                    symbols.customLogoDataUrl ? (
+                      <img
+                        src={symbols.customLogoDataUrl}
+                        alt={details.companyName}
+                        className="h-32 w-32 object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.45)]"
+                        style={{
+                          transform: `rotate(${symbols.customLogoRotation ?? 0}deg) scaleX(${symbols.customLogoFlipX ? -1 : 1})`,
+                          opacity: (symbols.customLogoOpacity ?? 100) / 100,
+                          filter:
+                            symbols.customLogoFullColor ?? true
+                              ? undefined
+                              : 'brightness(0) invert(0.92) sepia(0.35) saturate(2.4) hue-rotate(6deg)',
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs font-semibold tracking-wider text-white/60">
+                        UPLOAD OR SYNC LOGO
+                      </span>
+                    )
                   ) : symbols.crestStyle === 'postage-stamp' ? (
                     <PostageStampEmblem
                       goldColor="#E1BA59"
@@ -702,22 +722,73 @@ export const StudioCustomizer: React.FC<StudioCustomizerProps> = ({
                     })}
                   </div>
 
-                  {symbols.customLogoDataUrl && (symbols.crestCenterMode === 'custom-image') && (
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#E2DFD7] bg-white px-3.5 py-2.5">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={symbols.customLogoDataUrl}
-                          alt="Uploaded custom brand logo"
-                          className="h-9 w-9 rounded border border-[#E2DFD7] object-contain bg-[#FAF9F6] p-0.5"
-                        />
-                        <span className="text-xs font-semibold text-[#141413]">
-                          Custom Logo Active Inside Seal
-                        </span>
+                  {symbols.customLogoDataUrl &&
+                    (symbols.crestCenterMode === 'custom-image' || symbols.crestStyle === 'clean-logo') && (
+                    <div className="mt-3 space-y-2.5 rounded-lg border border-[#E2DFD7] bg-white px-3.5 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={symbols.customLogoDataUrl}
+                            alt="Active brand logo on card"
+                            className="h-9 w-9 rounded border border-[#E2DFD7] object-contain bg-[#FAF9F6] p-0.5"
+                          />
+                          <div>
+                            <span className="text-xs font-semibold text-[#141413] block">
+                              {symbols.crestStyle === 'clean-logo'
+                                ? 'Frameless Canvas Logo Active'
+                                : 'Custom Logo Active Inside Seal'}
+                            </span>
+                            <span className="text-[10.5px] text-[#6B675E]">
+                              Drag directly on the card preview or adjust framing below.
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSymbols((prev) => ({
+                                ...prev,
+                                crestStyle: 'clean-logo',
+                                crestCenterMode: 'custom-image',
+                              }))
+                            }
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold cursor-pointer ${
+                              symbols.crestStyle === 'clean-logo'
+                                ? 'bg-[#141413] text-white'
+                                : 'border border-[#D8D4C9] bg-[#FAF9F6] text-[#141413]'
+                            }`}
+                          >
+                            Clean Vector
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSymbols((prev) => ({
+                                ...prev,
+                                crestStyle:
+                                  prev.crestStyle === 'clean-logo' || prev.crestStyle === 'none'
+                                    ? 'notary-rosette'
+                                    : prev.crestStyle,
+                                crestCenterMode: 'custom-image',
+                              }))
+                            }
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-semibold cursor-pointer ${
+                              symbols.crestStyle !== 'clean-logo'
+                                ? 'bg-[#141413] text-white'
+                                : 'border border-[#D8D4C9] bg-[#FAF9F6] text-[#141413]'
+                            }`}
+                          >
+                            Royal Seal Frame
+                          </button>
+                        </div>
                       </div>
+
                       <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#141413] cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={symbols.customLogoFullColor ?? false}
+                          checked={symbols.customLogoFullColor ?? true}
                           onChange={(e) =>
                             setSymbols((prev) => ({ ...prev, customLogoFullColor: e.target.checked }))
                           }
@@ -992,50 +1063,141 @@ export const StudioCustomizer: React.FC<StudioCustomizerProps> = ({
               })}
             </div>
 
-            {/* Crest Scale, Metallic Gradient & Live Sheen */}
-            <div className="mt-5 grid grid-cols-1 gap-5 rounded-xl border border-[#EAE7DF] bg-[#FAF9F6] p-4 sm:grid-cols-2">
-              <div>
-                <div className="flex items-center justify-between text-xs font-semibold text-[#4A4740]">
-                  <span>Primary Seal / Logo Size</span>
-                  <span className="font-mono-num">{Math.round((symbols.crestScale ?? 1) * 100)}%</span>
+            {/* Crest / Logo Size, Position, Rotation & Metallic Sheen */}
+            <div className="mt-5 space-y-4 rounded-xl border border-[#EAE7DF] bg-[#FAF9F6] p-4">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div>
+                  <div className="flex items-center justify-between text-xs font-semibold text-[#4A4740]">
+                    <span>Primary Seal / Logo Size</span>
+                    <span className="font-mono-num">{Math.round((symbols.crestScale ?? 1) * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.45}
+                    max={2.0}
+                    step={0.05}
+                    value={symbols.crestScale ?? 1}
+                    onChange={(e) =>
+                      setSymbols((prev) => ({ ...prev, crestScale: parseFloat(e.target.value) }))
+                    }
+                    className="mt-2 w-full accent-[#141413] cursor-pointer"
+                  />
                 </div>
-                <input
-                  type="range"
-                  min={0.8}
-                  max={1.45}
-                  step={0.05}
-                  value={symbols.crestScale ?? 1}
-                  onChange={(e) =>
-                    setSymbols((prev) => ({ ...prev, crestScale: parseFloat(e.target.value) }))
-                  }
-                  className="mt-2 w-full accent-[#141413] cursor-pointer"
-                />
+
+                <div className="flex flex-wrap items-center justify-between sm:justify-end gap-5">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#141413] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={symbols.crestFoilGradient ?? true}
+                      onChange={(e) =>
+                        setSymbols((prev) => ({ ...prev, crestFoilGradient: e.target.checked }))
+                      }
+                      className="h-4 w-4 rounded accent-[#141413]"
+                    />
+                    <span>24K Metallic Foil Gradient</span>
+                  </label>
+
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#141413] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={symbols.crestLiveSheen ?? true}
+                      onChange={(e) =>
+                        setSymbols((prev) => ({ ...prev, crestLiveSheen: e.target.checked }))
+                      }
+                      className="h-4 w-4 rounded accent-[#141413]"
+                    />
+                    <span>Live Specular Sheen</span>
+                  </label>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between sm:justify-end gap-5">
-                <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#141413] cursor-pointer">
+              <div className="grid grid-cols-1 gap-4 border-t border-[#E5E1D7] pt-3.5 sm:grid-cols-4">
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-[#4A4740]">
+                    <span>Offset X</span>
+                    <span className="font-mono-num">{Math.round(symbols.customLogoOffsetX ?? 0)} px</span>
+                  </div>
                   <input
-                    type="checkbox"
-                    checked={symbols.crestFoilGradient ?? true}
+                    type="range"
+                    min={-120}
+                    max={120}
+                    step={2}
+                    value={symbols.customLogoOffsetX ?? 0}
                     onChange={(e) =>
-                      setSymbols((prev) => ({ ...prev, crestFoilGradient: e.target.checked }))
+                      setSymbols((prev) => ({ ...prev, customLogoOffsetX: parseInt(e.target.value, 10) }))
                     }
-                    className="h-4 w-4 rounded accent-[#141413]"
+                    className="mt-1.5 w-full accent-[#141413] cursor-pointer"
                   />
-                  <span>24K Metallic Foil Gradient</span>
-                </label>
+                </div>
 
-                <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#141413] cursor-pointer">
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-[#4A4740]">
+                    <span>Offset Y</span>
+                    <span className="font-mono-num">{Math.round(symbols.customLogoOffsetY ?? 0)} px</span>
+                  </div>
                   <input
-                    type="checkbox"
-                    checked={symbols.crestLiveSheen ?? true}
+                    type="range"
+                    min={-80}
+                    max={80}
+                    step={2}
+                    value={symbols.customLogoOffsetY ?? 0}
                     onChange={(e) =>
-                      setSymbols((prev) => ({ ...prev, crestLiveSheen: e.target.checked }))
+                      setSymbols((prev) => ({ ...prev, customLogoOffsetY: parseInt(e.target.value, 10) }))
                     }
-                    className="h-4 w-4 rounded accent-[#141413]"
+                    className="mt-1.5 w-full accent-[#141413] cursor-pointer"
                   />
-                  <span>Live Specular Sheen</span>
-                </label>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-[#4A4740]">
+                    <span>Rotation</span>
+                    <span className="font-mono-num">{Math.round(symbols.customLogoRotation ?? 0)}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={5}
+                    value={symbols.customLogoRotation ?? 0}
+                    onChange={(e) =>
+                      setSymbols((prev) => ({ ...prev, customLogoRotation: parseInt(e.target.value, 10) }))
+                    }
+                    className="mt-1.5 w-full accent-[#141413] cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSymbols((prev) => ({ ...prev, customLogoFlipX: !(prev.customLogoFlipX ?? false) }))
+                    }
+                    className={`flex-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold cursor-pointer ${
+                      symbols.customLogoFlipX
+                        ? 'border-[#141413] bg-[#141413] text-white'
+                        : 'border-[#D8D4C9] bg-white text-[#141413]'
+                    }`}
+                  >
+                    Flip H
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSymbols((prev) => ({
+                        ...prev,
+                        crestScale: 1,
+                        customLogoOffsetX: 0,
+                        customLogoOffsetY: 0,
+                        customLogoRotation: 0,
+                        customLogoOpacity: 100,
+                        customLogoFlipX: false,
+                      }))
+                    }
+                    className="rounded-lg border border-[#D8D4C9] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#141413] hover:bg-[#F3F1EC] cursor-pointer"
+                  >
+                    Center
+                  </button>
+                </div>
               </div>
             </div>
           </div>

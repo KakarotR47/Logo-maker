@@ -12,6 +12,7 @@ import { MockupPreviewView } from './components/MockupPreviewView';
 import { ProjectsDashboard } from './components/ProjectsDashboard';
 import { VariationsModal } from './components/VariationsModal';
 import { VisitingCardAtelier } from './components/VisitingCardAtelier';
+import { StudioLogoProvider } from './context/StudioLogoContext';
 import {
   DEFAULT_BRAND_BRIEF,
   VECTOR_ICONS,
@@ -1155,33 +1156,73 @@ export default function App() {
     setViewMode('editor');
   };
 
-  if (viewMode === 'landing') {
-    return (
-      <>
-        <LandingView
-          initialBrandName={brief.businessName === DEFAULT_BRAND_BRIEF.businessName ? '' : brief.businessName}
-          savedProjectsCount={projects.length}
-          onStartWithBrandName={handleStartFromLanding}
-          onOpenBlankEditor={() => setViewMode('editor')}
-          onOpenSampleInEditor={handleOpenSampleFromLanding}
-          onOpenProjects={() => setViewMode('projects')}
-        />
-        <LogoWizardModal
-          isOpen={wizardOpen}
-          onClose={() => setWizardOpen(false)}
-          brief={brief}
-          setBrief={setBrief}
-          activePalette={activePalette}
-          onGenerate={handleWizardGenerate}
-          onInsertTracedSymbol={handleInsertTracedSymbol}
-          onGenerateWithAiSymbol={handleWizardGenerateWithAiSymbol}
-        />
-      </>
-    );
-  }
+  const handleUpdateCanvasBrandMeta = (patch: {
+    brandName?: string;
+    tagline?: string;
+    primaryColor?: string;
+  }) => {
+    setBrief((prev) => ({
+      ...prev,
+      businessName: patch.brandName !== undefined ? patch.brandName : prev.businessName,
+      tagline: patch.tagline !== undefined ? patch.tagline : prev.tagline,
+    }));
+
+    const textLayers = activeDoc.layers
+      .filter((l): l is TextLayer => l.type === 'text' && l.visible)
+      .sort((a, b) => b.fontSize - a.fontSize);
+    const primaryTextId = textLayers[0]?.id;
+    const secondaryTextId = textLayers[1]?.id;
+
+    commitDocument({
+      ...activeDoc,
+      layers: activeDoc.layers.map((l) => {
+        if (l.type === 'text') {
+          if (l.id === primaryTextId && patch.brandName !== undefined) {
+            return { ...l, text: patch.brandName };
+          }
+          if (l.id === secondaryTextId && patch.tagline !== undefined) {
+            return { ...l, text: patch.tagline };
+          }
+        }
+        if (patch.primaryColor && (l.type === 'icon' || l.type === 'custom-svg')) {
+          return { ...l, fill: patch.primaryColor };
+        }
+        return l;
+      }),
+    });
+  };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8FAFC] dark:bg-[#0F1117] text-slate-900 dark:text-slate-100 transition-colors">
+    <StudioLogoProvider
+      activeDoc={activeDoc}
+      brief={brief}
+      activePalette={activePalette}
+      onJumpToLogoEditor={() => setViewMode('editor')}
+      onUpdateCanvasBrandMeta={handleUpdateCanvasBrandMeta}
+    >
+      {viewMode === 'landing' ? (
+        <>
+          <LandingView
+            initialBrandName={brief.businessName === DEFAULT_BRAND_BRIEF.businessName ? '' : brief.businessName}
+            savedProjectsCount={projects.length}
+            onStartWithBrandName={handleStartFromLanding}
+            onOpenBlankEditor={() => setViewMode('editor')}
+            onOpenSampleInEditor={handleOpenSampleFromLanding}
+            onOpenProjects={() => setViewMode('projects')}
+          />
+          <LogoWizardModal
+            isOpen={wizardOpen}
+            onClose={() => setWizardOpen(false)}
+            brief={brief}
+            setBrief={setBrief}
+            activePalette={activePalette}
+            onGenerate={handleWizardGenerate}
+            onInsertTracedSymbol={handleInsertTracedSymbol}
+            onGenerateWithAiSymbol={handleWizardGenerateWithAiSymbol}
+          />
+        </>
+      ) : (
+        <div className="min-h-screen flex flex-col bg-[#F8FAFC] dark:bg-[#0F1117] text-slate-900 dark:text-slate-100 transition-colors">
       {/* Sleek Studio Top Navigation Header */}
       <header className="border-b border-[#E2E8F0] dark:border-[#2A2D3D] bg-white dark:bg-[#161822]">
         <div className="mx-auto flex max-w-[1600px] flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-5 px-4 sm:px-5 py-2.5">
@@ -1410,10 +1451,7 @@ export default function App() {
 
       {viewMode === 'cards' && (
         <main className="flex-1">
-          <VisitingCardAtelier
-            activeCanvasDoc={activeDoc}
-            incomingLogoNonce={incomingLogoNonce}
-          />
+          <VisitingCardAtelier incomingLogoNonce={incomingLogoNonce} />
         </main>
       )}
 
@@ -1450,6 +1488,8 @@ export default function App() {
         }}
         onSaveAllToProjects={handleSaveFourVariationsToProjects}
       />
-    </div>
+        </div>
+      )}
+    </StudioLogoProvider>
   );
 }
