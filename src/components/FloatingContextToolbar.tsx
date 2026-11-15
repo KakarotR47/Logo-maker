@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import { FONT_OPTIONS, FONT_PAIRINGS, VECTOR_ICONS } from '../data/logoLibrary';
 import {
+  BlendMode,
   ClipMaskShapeKind,
   ColorPalette,
   FontOption,
@@ -52,23 +53,27 @@ import {
   LogoDocument,
   LogoLayer,
   ShapeKind,
+  SurfaceTextureConfig,
   TextLayer,
   TextPathAttachment,
 } from '../types/logo';
 import { extractLayerPathInArtboardSpace } from '../utils/pathGeometry';
 import { BooleanOpKind, isCombinableVectorLayer } from '../utils/booleanOps';
+import { BLEND_MODE_OPTIONS } from '../utils/surfaceTextures';
 import {
   batchLoadGoogleFonts,
   createDynamicGoogleFontOption,
   ensureFontOptionLoaded,
   loadGoogleFont,
 } from '../utils/googleFonts';
+import { FinishTexturePanel } from './FinishTexturePanel';
 import { GradientPatternPicker, buildGradientCss } from './GradientPatternPicker';
 import { resolveEffectiveTextWarp } from './CanvasLayerRenderer';
 import { TextEffectsStudio } from './TextEffectsStudio';
 
 type ContextPopoverId =
   | 'canvas-bg'
+  | 'surface-texture'
   | 'combine'
   | 'text-edit'
   | 'font'
@@ -120,6 +125,8 @@ interface FloatingContextToolbarProps {
   onBatchUpdateSelected: (patch: Partial<LogoLayer>) => void;
   onBooleanCombine?: (op: BooleanOpKind) => void;
   onCreateClippingMask?: () => void;
+  onKnockoutSelected?: () => void;
+  onUpdateSurfaceTexture?: (next: SurfaceTextureConfig) => void;
   onApplyFontPairing: (pairing: FontPairing) => void;
   onDuplicateSelected: () => void;
   onDeleteSelected: () => void;
@@ -181,6 +188,8 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
   onBatchUpdateSelected,
   onBooleanCombine,
   onCreateClippingMask,
+  onKnockoutSelected,
+  onUpdateSurfaceTexture,
   onApplyFontPairing,
   onDuplicateSelected,
   onDeleteSelected,
@@ -458,6 +467,37 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
           </button>
         )}
 
+        {/* Finish & Surface Texture Popover */}
+        {onUpdateSurfaceTexture && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => togglePopover('surface-texture')}
+              title="Non-destructive Distress, Halftone Dots, Brushed Metal & Paper Grain finishes"
+              className={`${toolBtnBase} ${
+                openPopover === 'surface-texture'
+                  ? toolBtnActive
+                  : doc.surfaceTexture?.enabled && doc.surfaceTexture.preset !== 'none'
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40'
+                    : toolBtnDefault
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Finish &amp; Texture</span>
+            </button>
+
+            {openPopover === 'surface-texture' && (
+              <div className={`${popoverClass} w-72 max-h-[70vh] overflow-y-auto`}>
+                <FinishTexturePanel
+                  texture={doc.surfaceTexture}
+                  onChange={onUpdateSurfaceTexture}
+                  compact
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         <span className={dividerClass} aria-hidden="true" />
 
         {onMagicRecolor && (
@@ -654,6 +694,19 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
           </button>
         )}
 
+        {/* Knockout / Cutout (top selected punches transparent hole through bottom selected) */}
+        {onKnockoutSelected && (
+          <button
+            type="button"
+            onClick={onKnockoutSelected}
+            title="Punch the top selected shape or text as a transparent cutout hole through the element below"
+            className={`${toolBtnBase} border border-[#E2E8F0] dark:border-[#2A2F3D] bg-teal-50/70 dark:bg-teal-500/15 text-teal-800 dark:text-teal-300 hover:bg-teal-100/80 dark:hover:bg-teal-500/25`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>Knockout / Cutout</span>
+          </button>
+        )}
+
         {/* Group / Ungroup */}
         {onGroupSelected && (
           <button
@@ -756,7 +809,7 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
           )}
         </div>
 
-        {/* Group Opacity */}
+        {/* Group Opacity & Blend Mode */}
         <div className="relative">
           <button
             type="button"
@@ -766,25 +819,45 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
             }`}
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
-            <span>{Math.round((selectedLayers[0]?.opacity ?? 1) * 100)}%</span>
+            <span>{Math.round((selectedLayers[0]?.opacity ?? 1) * 100)}% · Blend</span>
           </button>
           {openPopover === 'multi-opacity' && (
-            <div className={`${popoverClass} w-56 space-y-2`}>
-              <div className="flex justify-between text-xs font-medium">
-                <span>Group Opacity</span>
-                <span className="font-mono-num">
-                  {Math.round((selectedLayers[0]?.opacity ?? 1) * 100)}%
-                </span>
+            <div className={`${popoverClass} w-60 space-y-2.5`}>
+              <div>
+                <div className="flex justify-between text-xs font-medium">
+                  <span>Group Opacity</span>
+                  <span className="font-mono-num">
+                    {Math.round((selectedLayers[0]?.opacity ?? 1) * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={selectedLayers[0]?.opacity ?? 1}
+                  onChange={(e) => onBatchUpdateSelected({ opacity: Number(e.target.value) })}
+                  className="mt-1 w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
+                />
               </div>
-              <input
-                type="range"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={selectedLayers[0]?.opacity ?? 1}
-                onChange={(e) => onBatchUpdateSelected({ opacity: Number(e.target.value) })}
-                className="w-full accent-indigo-600 dark:accent-indigo-400 cursor-pointer"
-              />
+              <div className="border-t border-[#E2E8F0] dark:border-[#2A2F3D] pt-2">
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Blend Mode
+                </label>
+                <select
+                  value={selectedLayers[0]?.blendMode ?? 'normal'}
+                  onChange={(e) =>
+                    onBatchUpdateSelected({ blendMode: e.target.value as BlendMode })
+                  }
+                  className="w-full rounded-lg border border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] px-2 py-1.5 text-xs font-semibold text-slate-900 dark:text-slate-100 cursor-pointer focus:border-indigo-500 focus:outline-none"
+                >
+                  {BLEND_MODE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -2141,8 +2214,87 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
                       />
                     </div>
                   )}
+                  <label className="flex items-center justify-between pt-0.5 text-[10.5px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                    <span>Invert Mask (Cutout Hole)</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(singleLayer.clipMask.inverted)}
+                      onChange={(e) =>
+                        update({
+                          clipMask: {
+                            ...singleLayer.clipMask!,
+                            inverted: e.target.checked,
+                          },
+                        })
+                      }
+                      className="h-3.5 w-3.5 rounded accent-indigo-600"
+                    />
+                  </label>
                 </div>
               )}
+
+              {/* Layer Knockout / Cutout Through Underlying Element */}
+              {(() => {
+                const selfIdx = doc.layers.findIndex((l) => l.id === singleLayer.id);
+                const underlyingTargets = doc.layers
+                  .slice(0, Math.max(0, selfIdx))
+                  .filter((l) => l.visible && !l.isKnockout);
+                const canKnockout = underlyingTargets.length > 0 || Boolean(singleLayer.isKnockout);
+                if (!canKnockout) return null;
+                return (
+                  <div className="rounded-xl border border-teal-200/80 dark:border-teal-500/30 bg-teal-50/60 dark:bg-teal-950/25 p-2 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-semibold text-teal-900 dark:text-teal-200">
+                          Knockout / Cutout
+                        </p>
+                        <p className="text-[9.5px] text-teal-700/80 dark:text-teal-300/75">
+                          Punches transparent hole in layer below
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update({
+                            isKnockout: !singleLayer.isKnockout,
+                            knockoutTargetId: !singleLayer.isKnockout
+                              ? singleLayer.knockoutTargetId
+                              : undefined,
+                          })
+                        }
+                        className={`rounded-lg px-2.5 py-1 text-[10.5px] font-semibold cursor-pointer transition-colors ${
+                          singleLayer.isKnockout
+                            ? 'bg-teal-600 text-white'
+                            : 'border border-teal-400/60 bg-white dark:bg-[#181B23] text-teal-800 dark:text-teal-200 hover:bg-teal-100/70'
+                        }`}
+                      >
+                        {singleLayer.isKnockout ? 'Active · Release' : 'Enable'}
+                      </button>
+                    </div>
+                    {singleLayer.isKnockout && underlyingTargets.length > 1 && (
+                      <label className="block text-[10px] font-medium text-teal-800 dark:text-teal-300">
+                        Cut Through Target
+                        <select
+                          value={singleLayer.knockoutTargetId ?? ''}
+                          onChange={(e) =>
+                            update({
+                              knockoutTargetId: e.target.value || undefined,
+                            })
+                          }
+                          className="mt-1 w-full rounded-lg border border-teal-300/70 dark:border-teal-600/50 bg-white dark:bg-[#0F1117] px-2 py-1 text-[11px] font-semibold text-slate-900 dark:text-slate-100 cursor-pointer"
+                        >
+                          <option value="">Layer Directly Below</option>
+                          {[...underlyingTargets].reverse().map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Aspect Crop */}
@@ -2196,6 +2348,56 @@ export const FloatingContextToolbar: React.FC<FloatingContextToolbarProps> = ({
           </div>
         )}
       </div>
+
+      {/* Direct Knockout / Cutout 1-Click Toggle when layer sits above another */}
+      {(() => {
+        const selfIdx = doc.layers.findIndex((l) => l.id === singleLayer.id);
+        const hasBelow = doc.layers
+          .slice(0, Math.max(0, selfIdx))
+          .some((l) => l.visible && !l.isKnockout);
+        if (!hasBelow && !singleLayer.isKnockout) return null;
+        return (
+          <button
+            type="button"
+            onClick={() =>
+              update({
+                isKnockout: !singleLayer.isKnockout,
+                knockoutTargetId: !singleLayer.isKnockout
+                  ? singleLayer.knockoutTargetId
+                  : undefined,
+              })
+            }
+            title="Knockout / Cutout: punch a true transparent hole through the layer underneath"
+            className={`${toolBtnBase} ${
+              singleLayer.isKnockout
+                ? 'bg-teal-600 text-white shadow-xs'
+                : toolBtnDefault
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>{singleLayer.isKnockout ? 'Knockout On' : 'Knockout / Cutout'}</span>
+          </button>
+        );
+      })()}
+
+      {/* Direct Canvas Blend Mode Dropdown */}
+      <select
+        value={singleLayer.blendMode ?? 'normal'}
+        onChange={(e) => update({ blendMode: e.target.value as BlendMode })}
+        aria-label="Canvas Blend Mode"
+        title="Canvas Blend Mode for overlapping shapes and badges"
+        className={`rounded-lg border px-2 py-1.5 text-xs font-semibold cursor-pointer focus:border-indigo-500 focus:outline-none ${
+          singleLayer.blendMode && singleLayer.blendMode !== 'normal'
+            ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+            : 'border-[#E2E8F0] dark:border-[#2A2F3D] bg-slate-50 dark:bg-[#0F1117] text-slate-800 dark:text-slate-200'
+        }`}
+      >
+        {BLEND_MODE_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            Blend: {opt.label}
+          </option>
+        ))}
+      </select>
 
       {/* ================================================================= */}
       {/* OPACITY + TRANSFORM POPOVER                                       */}

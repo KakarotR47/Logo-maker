@@ -18,6 +18,14 @@ import {
   hasPerLetterEdits,
   resolveWarpConfig,
 } from '../utils/glyphLayout';
+import {
+  buildBrushedMetalGeometry,
+  buildHalftoneDotsGeometry,
+  buildPaperGrainGeometry,
+  buildVintageGritGeometry,
+  resolveKnockoutCompositing,
+  SURFACE_TEXTURE_PRESETS,
+} from '../utils/surfaceTextures';
 import { buildShapePath } from '../utils/pathGeometry';
 
 export { buildShapePath };
@@ -290,6 +298,7 @@ function getLayerFillProps(layer: LogoLayer, idPrefix: string): {
 
 function buildClipMaskDef(layer: LogoLayer, idPrefix: string): {
   clipPathAttr?: string;
+  maskAttr?: string;
   clipPathDef: React.ReactNode;
 } {
   const mask = layer.clipMask;
@@ -299,7 +308,9 @@ function buildClipMaskDef(layer: LogoLayer, idPrefix: string): {
   const scale = Math.max(0.35, Math.min(1.25, mask.scale ?? 1));
   const w = layer.width;
   const h = layer.height;
+  const inverted = Boolean(mask.inverted);
 
+  let geometryNode: React.ReactNode;
   if (mask.shape === 'custom' && mask.customPaths && mask.customPaths.length > 0) {
     const vbW = Math.max(1, mask.customViewBox?.width ?? w);
     const vbH = Math.max(1, mask.customViewBox?.height ?? h);
@@ -307,34 +318,60 @@ function buildClipMaskDef(layer: LogoLayer, idPrefix: string): {
     const sy = (h * scale) / vbH;
     const tx = (w * (1 - scale)) / 2;
     const ty = (h * (1 - scale)) / 2;
+    geometryNode = (
+      <g
+        transform={`translate(${tx.toFixed(1)}, ${ty.toFixed(1)}) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`}
+      >
+        {mask.customPaths.map((d, idx) => (
+          <path
+            key={idx}
+            d={d}
+            fill={inverted ? '#000000' : undefined}
+            fillRule="evenodd"
+            clipRule="evenodd"
+          />
+        ))}
+      </g>
+    );
+  } else {
+    const mw = Math.max(8, w * scale);
+    const mh = Math.max(8, h * scale);
+    const tx = (w - mw) / 2;
+    const ty = (h - mh) / 2;
+    const shapeKind: ShapeKind = mask.shape === 'custom' ? 'circle' : mask.shape;
+    const d = buildShapePath(shapeKind, mw, mh, mask.cornerRadius ?? 18);
+    geometryNode = (
+      <path
+        d={d}
+        fill={inverted ? '#000000' : undefined}
+        transform={`translate(${tx.toFixed(1)}, ${ty.toFixed(1)})`}
+      />
+    );
+  }
+
+  if (inverted) {
+    const pad = Math.max(40, layer.strokeWidth * 2 + 20);
     return {
-      clipPathAttr: `url(#${clipId})`,
+      maskAttr: `url(#${clipId})`,
       clipPathDef: (
-        <clipPath id={clipId}>
-          <g transform={`translate(${tx.toFixed(1)}, ${ty.toFixed(1)}) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`}>
-            {mask.customPaths.map((d, idx) => (
-              <path key={idx} d={d} clipRule="evenodd" />
-            ))}
-          </g>
-        </clipPath>
+        <mask
+          id={clipId}
+          maskUnits="userSpaceOnUse"
+          x={-pad}
+          y={-pad}
+          width={w + pad * 2}
+          height={h + pad * 2}
+        >
+          <rect x={-pad} y={-pad} width={w + pad * 2} height={h + pad * 2} fill="#ffffff" />
+          {geometryNode}
+        </mask>
       ),
     };
   }
 
-  const mw = Math.max(8, w * scale);
-  const mh = Math.max(8, h * scale);
-  const tx = (w - mw) / 2;
-  const ty = (h - mh) / 2;
-  const shapeKind: ShapeKind = mask.shape === 'custom' ? 'circle' : mask.shape;
-  const d = buildShapePath(shapeKind, mw, mh, mask.cornerRadius ?? 18);
-
   return {
     clipPathAttr: `url(#${clipId})`,
-    clipPathDef: (
-      <clipPath id={clipId}>
-        <path d={d} transform={`translate(${tx.toFixed(1)}, ${ty.toFixed(1)})`} />
-      </clipPath>
-    ),
+    clipPathDef: <clipPath id={clipId}>{geometryNode}</clipPath>,
   };
 }
 
@@ -343,75 +380,104 @@ interface RenderLayerProps {
   docBg: string;
   idPrefix: string;
   allLayers?: LogoLayer[];
+  /** Used internally by <mask> definitions to render solid black/white layer silhouettes */
+  forceMaskFill?: '#000000' | '#ffffff';
 }
 
-export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(({ layer, docBg, idPrefix, allLayers }) => {
-  if (!layer.visible) return null;
+export const CanvasLayerNode: React.FC<RenderLayerProps> = React.memo(
+  ({ layer, docBg, idPrefix, allLayers, forceMaskFill }) => {
+    if (!layer.visible) return null;
 
-  const cx = layer.x + layer.width / 2;
-  const cy = layer.y + layer.height / 2;
-  const flipTransform =
-    layer.flipX || layer.flipY
-      ? ` translate(${layer.flipX ? layer.width : 0}, ${layer.flipY ? layer.height : 0}) scale(${
-          layer.flipX ? -1 : 1
-        }, ${layer.flipY ? -1 : 1})`
-      : '';
-  const transform = `translate(${layer.x}, ${layer.y})${
-    layer.rotation ? ` rotate(${layer.rotation}, ${layer.width / 2}, ${layer.height / 2})` : ''
-  }${flipTransform}`;
-  const filterId = `${idPrefix}-sh-${layer.id}`;
-  const { fillAttr, gradientDef } = getLayerFillProps(layer, idPrefix);
-  const { clipPathAttr, clipPathDef } = buildClipMaskDef(layer, idPrefix);
+    const cx = layer.x + layer.width / 2;
+    const cy = layer.y + layer.height / 2;
+    const flipTransform =
+      layer.flipX || layer.flipY
+        ? ` translate(${layer.flipX ? layer.width : 0}, ${layer.flipY ? layer.height : 0}) scale(${
+            layer.flipX ? -1 : 1
+          }, ${layer.flipY ? -1 : 1})`
+        : '';
+    const transform = `translate(${layer.x}, ${layer.y})${
+      layer.rotation ? ` rotate(${layer.rotation}, ${layer.width / 2}, ${layer.height / 2})` : ''
+    }${flipTransform}`;
+    const filterId = `${idPrefix}-sh-${layer.id}`;
+    const { fillAttr: normalFillAttr, gradientDef } = forceMaskFill
+      ? { fillAttr: forceMaskFill, gradientDef: null }
+      : getLayerFillProps(layer, idPrefix);
+    const { clipPathAttr, maskAttr, clipPathDef } = buildClipMaskDef(layer, idPrefix);
 
-  const renderContent = () => {
-    switch (layer.type) {
-      case 'icon':
-        return renderIcon(layer, docBg, fillAttr);
-      case 'shape':
-        return renderShape(layer, fillAttr);
-      case 'divider':
-        return renderDivider(layer, fillAttr);
-      case 'text':
-        return renderText(layer, `${idPrefix}-arc-${layer.id}`, fillAttr, allLayers);
-      case 'path':
-        return renderPathLayer(layer, fillAttr);
-      case 'custom-svg':
-        return renderCustomSvg(layer, fillAttr);
-    }
-  };
+    const renderContent = () => {
+      switch (layer.type) {
+        case 'icon':
+          return renderIcon(layer, docBg, normalFillAttr, forceMaskFill);
+        case 'shape':
+          return renderShape(layer, normalFillAttr, forceMaskFill);
+        case 'divider':
+          return renderDivider(layer, normalFillAttr);
+        case 'text':
+          return renderText(layer, `${idPrefix}-arc-${layer.id}`, normalFillAttr, allLayers, forceMaskFill);
+        case 'path':
+          return renderPathLayer(layer, normalFillAttr, forceMaskFill);
+        case 'custom-svg':
+          return renderCustomSvg(layer, normalFillAttr, forceMaskFill);
+      }
+    };
 
-  return (
-    <g
-      data-layer-id={layer.id}
-      transform={transform}
-      opacity={layer.opacity}
-      filter={layer.shadow.enabled ? `url(#${filterId})` : undefined}
-    >
-      {(layer.shadow.enabled || gradientDef || clipPathDef) && (
-        <defs>
-          {gradientDef}
-          {clipPathDef}
-          {layer.shadow.enabled && (
-            <filter id={filterId} x="-35%" y="-35%" width="170%" height="170%">
-              <feDropShadow
-                dx={layer.shadow.offsetX}
-                dy={layer.shadow.offsetY}
-                stdDeviation={Math.max(0.5, layer.shadow.blur / 2)}
-                floodColor={layer.shadow.color}
-              />
-            </filter>
-          )}
-        </defs>
-      )}
-      {/* Invisible hit target rect so dragging anywhere inside bounding box works smoothly */}
-      <rect data-hit-target="true" x={0} y={0} width={layer.width} height={layer.height} fill="transparent" />
-      {clipPathAttr ? <g clipPath={clipPathAttr}>{renderContent()}</g> : renderContent()}
-      <title data-cx={cx} data-cy={cy}>{layer.name}</title>
-    </g>
-  );
-});
+    const blendStyle =
+      !forceMaskFill && layer.blendMode && layer.blendMode !== 'normal'
+        ? { mixBlendMode: layer.blendMode }
+        : undefined;
 
-function renderIcon(layer: IconLayer, docBg: string, fillAttr: string) {
+    return (
+      <g
+        data-layer-id={forceMaskFill ? undefined : layer.id}
+        transform={transform}
+        opacity={layer.opacity}
+        style={blendStyle}
+        filter={!forceMaskFill && layer.shadow.enabled ? `url(#${filterId})` : undefined}
+      >
+        {( (!forceMaskFill && layer.shadow.enabled) || gradientDef || clipPathDef) && (
+          <defs>
+            {gradientDef}
+            {clipPathDef}
+            {!forceMaskFill && layer.shadow.enabled && (
+              <filter id={filterId} x="-35%" y="-35%" width="170%" height="170%">
+                <feDropShadow
+                  dx={layer.shadow.offsetX}
+                  dy={layer.shadow.offsetY}
+                  stdDeviation={Math.max(0.5, layer.shadow.blur / 2)}
+                  floodColor={layer.shadow.color}
+                />
+              </filter>
+            )}
+          </defs>
+        )}
+        {/* Invisible hit target rect so dragging anywhere inside bounding box works smoothly */}
+        {!forceMaskFill && (
+          <rect data-hit-target="true" x={0} y={0} width={layer.width} height={layer.height} fill="transparent" />
+        )}
+        {clipPathAttr ? (
+          <g clipPath={clipPathAttr}>{renderContent()}</g>
+        ) : maskAttr ? (
+          <g mask={maskAttr}>{renderContent()}</g>
+        ) : (
+          renderContent()
+        )}
+        {!forceMaskFill && (
+          <title data-cx={cx} data-cy={cy}>
+            {layer.name}
+          </title>
+        )}
+      </g>
+    );
+  }
+);
+
+function renderIcon(
+  layer: IconLayer,
+  docBg: string,
+  fillAttr: string,
+  forceMaskFill?: '#000000' | '#ffffff'
+) {
   const icon = VECTOR_ICONS.find((ic) => ic.id === layer.iconId) ?? VECTOR_ICONS[0];
   const scaleX = layer.width / 100;
   const scaleY = layer.height / 100;
@@ -419,18 +485,25 @@ function renderIcon(layer: IconLayer, docBg: string, fillAttr: string) {
   return (
     <g transform={`scale(${scaleX}, ${scaleY})`}>
       {icon.paths.map((p, idx) => {
-        const override = layer.partColors?.[idx];
+        const override = forceMaskFill ? undefined : layer.partColors?.[idx];
+        const cutoutColor = forceMaskFill
+          ? forceMaskFill === '#000000'
+            ? '#ffffff'
+            : '#000000'
+          : docBg === 'transparent'
+            ? '#FFFFFF'
+            : docBg;
         const color =
           override ||
-          (p.role === 'primary'
-            ? fillAttr
-            : p.role === 'accent'
-              ? layer.accentFill || fillAttr
-              : p.role === 'secondary'
-                ? layer.secondaryFill || fillAttr
-                : docBg === 'transparent'
-                  ? '#FFFFFF'
-                  : docBg);
+          (p.role === 'cutout'
+            ? cutoutColor
+            : forceMaskFill
+              ? forceMaskFill
+              : p.role === 'primary'
+                ? fillAttr
+                : p.role === 'accent'
+                  ? layer.accentFill || fillAttr
+                  : layer.secondaryFill || fillAttr);
 
         if (p.strokeOnly) {
           return (
@@ -446,13 +519,16 @@ function renderIcon(layer: IconLayer, docBg: string, fillAttr: string) {
           );
         }
 
+        const resolvedStroke =
+          layer.strokeWidth > 0 ? (forceMaskFill ?? layer.stroke) : 'none';
+
         return (
           <path
             key={idx}
             d={p.d}
             fill={color}
             fillRule={p.fillRule ?? 'nonzero'}
-            stroke={layer.strokeWidth > 0 ? layer.stroke : 'none'}
+            stroke={resolvedStroke}
             strokeWidth={layer.strokeWidth > 0 ? layer.strokeWidth / Math.max(0.3, scaleX) : 0}
           />
         );
@@ -461,12 +537,16 @@ function renderIcon(layer: IconLayer, docBg: string, fillAttr: string) {
   );
 }
 
-function renderShape(layer: ShapeLayer, fillAttr: string) {
+function renderShape(
+  layer: ShapeLayer,
+  fillAttr: string,
+  forceMaskFill?: '#000000' | '#ffffff'
+) {
   const d = buildShapePath(layer.shapeKind, layer.width, layer.height, layer.cornerRadius);
   const fillVal = layer.shapeKind === 'ring' || layer.shapeKind === 'frame' ? 'none' : fillAttr;
   const strokeVal =
     layer.strokeWidth > 0
-      ? layer.stroke
+      ? forceMaskFill ?? layer.stroke
       : layer.shapeKind === 'ring' || layer.shapeKind === 'frame'
         ? fillAttr
         : 'none';
@@ -539,7 +619,8 @@ function renderText(
   layer: TextLayer,
   idBase: string,
   fillAttr: string,
-  allLayers?: LogoLayer[]
+  allLayers?: LogoLayer[],
+  forceMaskFill?: '#000000' | '#ffffff'
 ) {
   const arcPathId = `${idBase}-path`;
   const raw = layer.uppercase ? layer.text.toUpperCase() : layer.text;
@@ -699,7 +780,20 @@ function renderText(
   let effectDefs: React.ReactNode = null;
   const passes: React.ReactNode[] = [];
 
-  if (style === 'hollow') {
+  if (forceMaskFill) {
+    passes.push(
+      renderGlyphPass({
+        key: 'mask-solid',
+        fill: style === 'hollow' ? 'none' : forceMaskFill,
+        stroke:
+          style === 'hollow' || layer.strokeWidth > 0 ? forceMaskFill : 'none',
+        strokeWidth:
+          style === 'hollow'
+            ? Math.max(1.4, (layer.strokeWidth > 0 ? layer.strokeWidth : 2.6) * intensity)
+            : layer.strokeWidth,
+      })
+    );
+  } else if (style === 'hollow') {
     const sw = Math.max(1.4, (layer.strokeWidth > 0 ? layer.strokeWidth : 2.6) * intensity);
     const strokeCol =
       effect?.primaryColor ||
@@ -881,18 +975,22 @@ function renderText(
   );
 }
 
-function renderPathLayer(layer: PathLayer, fillAttr: string) {
+function renderPathLayer(
+  layer: PathLayer,
+  fillAttr: string,
+  forceMaskFill?: '#000000' | '#ffffff'
+) {
   const sx = layer.width / Math.max(1, layer.sourceViewBox.width);
   const sy = layer.height / Math.max(1, layer.sourceViewBox.height);
   const isOpen = Boolean(layer.isOpenPath) && (layer.fill === 'transparent' || layer.fill === 'none');
   const resolvedFill = isOpen ? 'none' : fillAttr;
   const resolvedStroke =
     layer.strokeWidth > 0 && layer.stroke !== 'none'
-      ? layer.stroke
+      ? forceMaskFill ?? layer.stroke
       : isOpen
         ? fillAttr !== 'transparent' && fillAttr !== 'none'
           ? fillAttr
-          : '#141413'
+          : forceMaskFill ?? '#141413'
         : 'none';
   const resolvedStrokeW =
     layer.strokeWidth > 0
@@ -920,7 +1018,11 @@ function renderPathLayer(layer: PathLayer, fillAttr: string) {
   );
 }
 
-function renderCustomSvg(layer: CustomSvgLayer, fillAttr: string) {
+function renderCustomSvg(
+  layer: CustomSvgLayer,
+  fillAttr: string,
+  forceMaskFill?: '#000000' | '#ffffff'
+) {
   const parts = layer.viewBox.trim().split(/\s+/).map(Number);
   const vbX = Number.isFinite(parts[0]) ? parts[0] : 0;
   const vbY = Number.isFinite(parts[1]) ? parts[1] : 0;
@@ -932,20 +1034,20 @@ function renderCustomSvg(layer: CustomSvgLayer, fillAttr: string) {
   return (
     <g transform={`scale(${sx}, ${sy}) translate(${-vbX}, ${-vbY})`}>
       {layer.paths.map((p, idx) => {
-        const useOriginal = layer.preserveOriginalColors;
+        const useOriginal = !forceMaskFill && layer.preserveOriginalColors;
         const hasStrokeOnly = p.fill === 'none';
         const fill = hasStrokeOnly
           ? 'none'
-          : useOriginal && p.fill
-            ? p.fill
-            : fillAttr;
+          : forceMaskFill
+            ? forceMaskFill
+            : useOriginal && p.fill
+              ? p.fill
+              : fillAttr;
         const stroke =
           layer.strokeWidth > 0
-            ? layer.stroke
+            ? forceMaskFill ?? layer.stroke
             : hasStrokeOnly || (p.stroke && p.stroke !== 'none')
-              ? useOriginal && p.stroke && p.stroke !== 'none'
-                ? p.stroke
-                : fillAttr
+              ? forceMaskFill ?? (useOriginal && p.stroke && p.stroke !== 'none' ? p.stroke : fillAttr)
               : 'none';
         const sw =
           layer.strokeWidth > 0
@@ -969,6 +1071,454 @@ function renderCustomSvg(layer: CustomSvgLayer, fillAttr: string) {
   );
 }
 
+interface SceneLayersProps {
+  doc: LogoDocument;
+  docBg: string;
+  idPrefix: string;
+  wrapInteractiveLayer?: (
+    layer: LogoLayer,
+    node: React.ReactNode,
+    options?: { isKnockoutCutter?: boolean }
+  ) => React.ReactNode;
+}
+
+/**
+ * Shared compositing scene renderer used by both the live interactive editor
+ * and clean SVG/PNG/PDF exports. Handles:
+ *  - Knockout / Cutout SVG masks punching true transparent holes through underlying layers
+ *  - Non-destructive Vintage Grit, Halftone Dots, Brushed Metal & Paper Grain finishes
+ */
+export const LogoSceneLayers: React.FC<SceneLayersProps> = React.memo(
+  ({ doc, docBg, idPrefix, wrapInteractiveLayer }) => {
+    const { cuttersByTargetId, consumedKnockoutIds } = React.useMemo(
+      () => resolveKnockoutCompositing(doc.layers),
+      [doc.layers]
+    );
+
+    const tex = doc.surfaceTexture;
+    const texActive = Boolean(tex?.enabled && tex.preset !== 'none');
+    const texMeta = texActive
+      ? SURFACE_TEXTURE_PRESETS.find((m) => m.preset === tex?.preset)
+      : undefined;
+    const texMode = tex?.mode ?? texMeta?.defaultMode ?? 'distress';
+    const texScale = Math.max(0.35, Math.min(3, tex?.scale ?? 1));
+    const texAngle = tex?.angle ?? texMeta?.defaultAngle ?? 15;
+    const texIntensity = Math.max(0.1, Math.min(1, tex?.intensity ?? 0.65));
+    const texSeed = tex?.seed ?? 42;
+    const texInverted = Boolean(tex?.inverted);
+
+    const maskPad = 1200;
+    const texPatId = `${idPrefix}-stex-pat`;
+    const texMaskId = `${idPrefix}-stex-mask`;
+    const artSilMaskId = `${idPrefix}-artsil-mask`;
+    const sheenGradId = `${idPrefix}-metal-sheen`;
+
+    const renderTexturePatternContent = (
+      mode: 'distress' | 'overlay' | 'canvas',
+      inverted: boolean
+    ) => {
+      if (!tex || !texActive) return null;
+
+      if (tex.preset === 'vintage-grit') {
+        const { tileW, tileH, specks } = buildVintageGritGeometry(texSeed, texIntensity);
+        const holeColor = mode === 'distress' ? (inverted ? '#ffffff' : '#000000') : '#141413';
+        return {
+          tileW,
+          tileH,
+          elements: specks.map((s, i) => {
+            if (s.kind === 'circle') {
+              return (
+                <circle
+                  key={i}
+                  cx={s.x}
+                  cy={s.y}
+                  r={s.w}
+                  fill={holeColor}
+                  opacity={s.alpha}
+                />
+              );
+            }
+            return (
+              <rect
+                key={i}
+                x={s.x}
+                y={s.y}
+                width={s.w}
+                height={s.h}
+                rx={s.kind === 'scratch' ? s.h / 2 : 0.4}
+                fill={holeColor}
+                opacity={s.alpha}
+                transform={s.rot ? `rotate(${s.rot}, ${s.x}, ${s.y})` : undefined}
+              />
+            );
+          }),
+        };
+      }
+
+      if (tex.preset === 'halftone-dots') {
+        const { tileW, tileH, dots } = buildHalftoneDotsGeometry(texIntensity);
+        const dotColor = mode === 'distress' ? (inverted ? '#ffffff' : '#000000') : '#0F172A';
+        return {
+          tileW,
+          tileH,
+          elements: dots.map((d, i) => (
+            <circle
+              key={i}
+              cx={d.cx}
+              cy={d.cy}
+              r={d.r}
+              fill={dotColor}
+              opacity={mode === 'distress' ? 0.92 : Math.min(0.65, texIntensity * 0.75)}
+            />
+          )),
+        };
+      }
+
+      if (tex.preset === 'brushed-metal') {
+        const { tileW, tileH, streaks } = buildBrushedMetalGeometry(texSeed, texIntensity);
+        return {
+          tileW,
+          tileH,
+          elements: streaks.map((st, i) => (
+            <line
+              key={i}
+              x1={st.x1}
+              y1={st.y}
+              x2={st.x2}
+              y2={st.y}
+              stroke={
+                mode === 'distress'
+                  ? inverted
+                    ? '#ffffff'
+                    : '#000000'
+                  : st.tone === 'light'
+                    ? '#FFFFFF'
+                    : '#0F172A'
+              }
+              strokeWidth={st.strokeWidth}
+              strokeLinecap="round"
+              opacity={mode === 'distress' ? Math.min(0.85, st.opacity * 1.45) : st.opacity}
+            />
+          )),
+        };
+      }
+
+      if (tex.preset === 'paper-grain') {
+        const { tileW, tileH, fibers } = buildPaperGrainGeometry(texSeed, texIntensity);
+        return {
+          tileW,
+          tileH,
+          elements: fibers.map((fb, i) => {
+            const color =
+              mode === 'distress'
+                ? inverted
+                  ? '#ffffff'
+                  : '#000000'
+                : fb.tone === 'dark'
+                  ? '#1E293B'
+                  : '#FFFFFF';
+            if (fb.kind === 'grain') {
+              return (
+                <circle
+                  key={i}
+                  cx={fb.x1}
+                  cy={fb.y1}
+                  r={fb.r}
+                  fill={color}
+                  opacity={mode === 'distress' ? fb.opacity * 1.65 : fb.opacity}
+                />
+              );
+            }
+            return (
+              <line
+                key={i}
+                x1={fb.x1}
+                y1={fb.y1}
+                x2={fb.x2}
+                y2={fb.y2}
+                stroke={color}
+                strokeWidth={0.75}
+                strokeLinecap="round"
+                opacity={mode === 'distress' ? fb.opacity * 1.6 : fb.opacity}
+              />
+            );
+          }),
+        };
+      }
+
+      return null;
+    };
+
+    const texPattern = renderTexturePatternContent(texMode, texInverted);
+
+    const renderBaseLayers = (maskSilhouette?: '#ffffff') =>
+      doc.layers.map((layer) => {
+        if (!layer.visible) return null;
+
+        const isConsumedKnockout = consumedKnockoutIds.has(layer.id);
+        if (isConsumedKnockout) {
+          if (maskSilhouette || !wrapInteractiveLayer) return null;
+          const invisibleHitNode = (
+            <g opacity={0}>
+              <CanvasLayerNode
+                layer={layer}
+                docBg={docBg}
+                idPrefix={`${idPrefix}-hit`}
+                allLayers={doc.layers}
+              />
+            </g>
+          );
+          return (
+            <React.Fragment key={layer.id}>
+              {wrapInteractiveLayer(layer, invisibleHitNode, { isKnockoutCutter: true })}
+            </React.Fragment>
+          );
+        }
+
+        const cutters = cuttersByTargetId.get(layer.id);
+        const node = (
+          <CanvasLayerNode
+            layer={layer}
+            docBg={docBg}
+            idPrefix={maskSilhouette ? `${idPrefix}-sil` : idPrefix}
+            allLayers={doc.layers}
+            forceMaskFill={maskSilhouette}
+          />
+        );
+
+        const wrappedNode =
+          cutters && cutters.length > 0 ? (
+            <g mask={`url(#${idPrefix}-ko-${layer.id}${maskSilhouette ? '-sil' : ''})`}>
+              {node}
+            </g>
+          ) : (
+            node
+          );
+
+        if (maskSilhouette || !wrapInteractiveLayer) {
+          return <React.Fragment key={layer.id}>{wrappedNode}</React.Fragment>;
+        }
+
+        return (
+          <React.Fragment key={layer.id}>
+            {wrapInteractiveLayer(layer, wrappedNode, { isKnockoutCutter: false })}
+          </React.Fragment>
+        );
+      });
+
+    const needsArtworkSilhouette =
+      texActive && texPattern !== null && texMode === 'overlay';
+
+    return (
+      <>
+        {(cuttersByTargetId.size > 0 || (texActive && texPattern)) && (
+          <defs>
+            {/* Knockout Cutout Masks for Target Layers */}
+            {Array.from(cuttersByTargetId.entries()).map(([targetId, cutters]) => (
+              <React.Fragment key={`komask-${targetId}`}>
+                <mask
+                  id={`${idPrefix}-ko-${targetId}`}
+                  maskUnits="userSpaceOnUse"
+                  x={-maskPad}
+                  y={-maskPad}
+                  width={doc.width + maskPad * 2}
+                  height={doc.height + maskPad * 2}
+                >
+                  <rect
+                    x={-maskPad}
+                    y={-maskPad}
+                    width={doc.width + maskPad * 2}
+                    height={doc.height + maskPad * 2}
+                    fill="#ffffff"
+                  />
+                  {cutters.map((cutter) => (
+                    <CanvasLayerNode
+                      key={`cutter-${cutter.id}`}
+                      layer={cutter}
+                      docBg="#ffffff"
+                      idPrefix={`${idPrefix}-ko-${targetId}`}
+                      allLayers={doc.layers}
+                      forceMaskFill="#000000"
+                    />
+                  ))}
+                </mask>
+                {needsArtworkSilhouette && (
+                  <mask
+                    id={`${idPrefix}-ko-${targetId}-sil`}
+                    maskUnits="userSpaceOnUse"
+                    x={-maskPad}
+                    y={-maskPad}
+                    width={doc.width + maskPad * 2}
+                    height={doc.height + maskPad * 2}
+                  >
+                    <rect
+                      x={-maskPad}
+                      y={-maskPad}
+                      width={doc.width + maskPad * 2}
+                      height={doc.height + maskPad * 2}
+                      fill="#ffffff"
+                    />
+                    {cutters.map((cutter) => (
+                      <CanvasLayerNode
+                        key={`cutter-sil-${cutter.id}`}
+                        layer={cutter}
+                        docBg="#ffffff"
+                        idPrefix={`${idPrefix}-ko-${targetId}-sil`}
+                        allLayers={doc.layers}
+                        forceMaskFill="#000000"
+                      />
+                    ))}
+                  </mask>
+                )}
+              </React.Fragment>
+            ))}
+
+            {/* Finish & Texture Pattern + Masks */}
+            {texActive && texPattern && (
+              <>
+                <pattern
+                  id={texPatId}
+                  width={texPattern.tileW}
+                  height={texPattern.tileH}
+                  patternUnits="userSpaceOnUse"
+                  patternTransform={`rotate(${texAngle}) scale(${texScale})`}
+                >
+                  {texPattern.elements}
+                </pattern>
+
+                {tex?.preset === 'brushed-metal' && texMode !== 'distress' && (
+                  <linearGradient
+                    id={sheenGradId}
+                    gradientUnits="userSpaceOnUse"
+                    x1="0"
+                    y1="0"
+                    x2={doc.width}
+                    y2={doc.height * 0.72}
+                  >
+                    <stop offset="0%" stopColor="#FFFFFF" stopOpacity={0.34 * texIntensity} />
+                    <stop offset="28%" stopColor="#0F172A" stopOpacity={0.14 * texIntensity} />
+                    <stop offset="52%" stopColor="#FFFFFF" stopOpacity={0.44 * texIntensity} />
+                    <stop offset="76%" stopColor="#0F172A" stopOpacity={0.18 * texIntensity} />
+                    <stop offset="100%" stopColor="#FFFFFF" stopOpacity={0.3 * texIntensity} />
+                  </linearGradient>
+                )}
+
+                {texMode === 'distress' && (
+                  <mask
+                    id={texMaskId}
+                    maskUnits="userSpaceOnUse"
+                    x={-maskPad}
+                    y={-maskPad}
+                    width={doc.width + maskPad * 2}
+                    height={doc.height + maskPad * 2}
+                  >
+                    <rect
+                      x={-maskPad}
+                      y={-maskPad}
+                      width={doc.width + maskPad * 2}
+                      height={doc.height + maskPad * 2}
+                      fill={texInverted ? '#262626' : '#ffffff'}
+                    />
+                    <rect
+                      x={-maskPad}
+                      y={-maskPad}
+                      width={doc.width + maskPad * 2}
+                      height={doc.height + maskPad * 2}
+                      fill={`url(#${texPatId})`}
+                    />
+                  </mask>
+                )}
+
+                {needsArtworkSilhouette && (
+                  <mask
+                    id={artSilMaskId}
+                    maskUnits="userSpaceOnUse"
+                    x={-maskPad}
+                    y={-maskPad}
+                    width={doc.width + maskPad * 2}
+                    height={doc.height + maskPad * 2}
+                  >
+                    <rect
+                      x={-maskPad}
+                      y={-maskPad}
+                      width={doc.width + maskPad * 2}
+                      height={doc.height + maskPad * 2}
+                      fill="#000000"
+                    />
+                    {renderBaseLayers('#ffffff')}
+                  </mask>
+                )}
+              </>
+            )}
+          </defs>
+        )}
+
+        <g
+          data-artwork-root="true"
+          mask={texActive && texPattern && texMode === 'distress' ? `url(#${texMaskId})` : undefined}
+        >
+          {renderBaseLayers()}
+        </g>
+
+        {texActive && texPattern && texMode === 'overlay' && (
+          <g
+            data-texture-overlay="true"
+            pointerEvents="none"
+            mask={`url(#${artSilMaskId})`}
+            style={{
+              mixBlendMode: tex?.preset === 'brushed-metal' ? 'soft-light' : 'overlay',
+            }}
+          >
+            {tex?.preset === 'brushed-metal' && (
+              <rect
+                x={0}
+                y={0}
+                width={doc.width}
+                height={doc.height}
+                fill={`url(#${sheenGradId})`}
+              />
+            )}
+            <rect
+              x={0}
+              y={0}
+              width={doc.width}
+              height={doc.height}
+              fill={`url(#${texPatId})`}
+            />
+          </g>
+        )}
+
+        {texActive && texPattern && texMode === 'canvas' && (
+          <g
+            data-texture-overlay="true"
+            pointerEvents="none"
+            style={{
+              mixBlendMode: tex?.preset === 'brushed-metal' ? 'soft-light' : 'multiply',
+            }}
+          >
+            {tex?.preset === 'brushed-metal' && (
+              <rect
+                x={0}
+                y={0}
+                width={doc.width}
+                height={doc.height}
+                fill={`url(#${sheenGradId})`}
+              />
+            )}
+            <rect
+              x={0}
+              y={0}
+              width={doc.width}
+              height={doc.height}
+              fill={`url(#${texPatId})`}
+            />
+          </g>
+        )}
+      </>
+    );
+  }
+);
+
 interface DocumentSvgProps {
   doc: LogoDocument;
   idPrefix: string;
@@ -989,19 +1539,12 @@ export const LogoDocumentSvg: React.FC<DocumentSvgProps> = React.memo(({
       xmlns="http://www.w3.org/2000/svg"
       viewBox={`0 0 ${doc.width} ${doc.height}`}
       className={className}
+      style={{ isolation: 'isolate' }}
     >
       {bg !== 'transparent' && (
         <rect x={0} y={0} width={doc.width} height={doc.height} fill={bg} />
       )}
-      {doc.layers.map((layer) => (
-        <CanvasLayerNode
-          key={layer.id}
-          layer={layer}
-          docBg={bg}
-          idPrefix={idPrefix}
-          allLayers={doc.layers}
-        />
-      ))}
+      <LogoSceneLayers doc={doc} docBg={bg} idPrefix={idPrefix} />
     </svg>
   );
 });

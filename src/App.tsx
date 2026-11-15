@@ -51,6 +51,7 @@ import {
   SavedBrandKit,
   ShapeKind,
   StudioViewMode,
+  SurfaceTextureConfig,
   TextLayer,
 } from './types/logo';
 import { PlanTier } from './types/monetization';
@@ -1378,6 +1379,45 @@ export default function App() {
     setSelectedLayerIds([res.clippedLayer.id]);
   };
 
+  const handleKnockoutSelected = () => {
+    const ordered = activeDoc.layers.filter(
+      (l) => selectedLayerIds.includes(l.id) && l.visible
+    );
+    if (ordered.length < 2) {
+      showEditorNotice('Select 2+ overlapping layers to punch a Knockout / Cutout hole.');
+      return;
+    }
+    const target = ordered[0];
+    const cutterIds = new Set(ordered.slice(1).map((l) => l.id));
+    const allCuttersAlreadyActive = ordered
+      .slice(1)
+      .every((l) => l.isKnockout && l.knockoutTargetId === target.id);
+
+    const nextLayers = activeDoc.layers.map((l) => {
+      if (l.id === target.id && l.isKnockout) {
+        return { ...l, isKnockout: false, knockoutTargetId: undefined };
+      }
+      if (!cutterIds.has(l.id)) return l;
+      if (allCuttersAlreadyActive) {
+        return { ...l, isKnockout: false, knockoutTargetId: undefined };
+      }
+      return { ...l, isKnockout: true, knockoutTargetId: target.id };
+    });
+
+    commitDocument({ ...activeDoc, layers: nextLayers });
+    if (allCuttersAlreadyActive) {
+      showEditorNotice('Knockout cutout released back to solid layers.');
+    } else {
+      const topCutter = ordered[ordered.length - 1];
+      setSelectedLayerIds([topCutter.id]);
+      showEditorNotice(`Knockout active — "${topCutter.name}" now punches through "${target.name}".`);
+    }
+  };
+
+  const handleUpdateSurfaceTexture = (nextTexture: SurfaceTextureConfig) => {
+    commitDocument({ ...activeDoc, surfaceTexture: nextTexture });
+  };
+
   const handleSaveBrandKit = () => {
     const variants = extractBrandVariants(activeDoc, brief, activePalette);
     const kit: SavedBrandKit = {
@@ -1914,6 +1954,7 @@ export default function App() {
             onReorderLayer={handleReorderLayer}
             onDuplicateLayer={handleDuplicateLayer}
             onDeleteLayer={handleDeleteLayer}
+            onUpdateSurfaceTexture={handleUpdateSurfaceTexture}
             penMode={canvasToolMode === 'pen'}
             perLetterMode={canvasToolMode === 'per-letter'}
             onTogglePenTool={handleTogglePenTool}
@@ -1935,6 +1976,8 @@ export default function App() {
               onBatchUpdateSelected={handleBatchUpdateSelected}
               onBooleanCombine={handleBooleanCombine}
               onCreateClippingMask={handleCreateClippingMask}
+              onKnockoutSelected={handleKnockoutSelected}
+              onUpdateSurfaceTexture={handleUpdateSurfaceTexture}
               editorNotice={editorNotice}
               onApplyFontPairing={handleApplyFontPairing}
               onReorderLayer={handleReorderLayer}

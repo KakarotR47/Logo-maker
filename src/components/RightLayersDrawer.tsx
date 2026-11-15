@@ -292,7 +292,20 @@ export const RightLayersDrawer: React.FC<RightLayersDrawerProps> = ({
             </p>
             <p className="text-[10px] uppercase tracking-wider text-slate-400">
               {layer.type}
-              {layer.clipMask?.enabled ? ' · Mask' : ''}
+              {layer.isKnockout ? (
+                <span className="text-teal-600 dark:text-teal-400 font-semibold"> · Knockout</span>
+              ) : null}
+              {layer.blendMode && layer.blendMode !== 'normal' ? (
+                <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
+                  {' '}
+                  · {layer.blendMode}
+                </span>
+              ) : null}
+              {layer.clipMask?.enabled
+                ? layer.clipMask.inverted
+                  ? ' · Cutout Mask'
+                  : ' · Mask'
+                : ''}
             </p>
           </button>
         )}
@@ -604,6 +617,9 @@ export const RightLayersDrawer: React.FC<RightLayersDrawerProps> = ({
               </p>
               <p className="font-mono-num truncate text-[10px] text-slate-500 dark:text-slate-400">
                 {doc.transparentBackground ? 'Transparent' : doc.backgroundColor.toUpperCase()}
+                {doc.surfaceTexture?.enabled && doc.surfaceTexture.preset !== 'none'
+                  ? ` · ${doc.surfaceTexture.preset}`
+                  : ''}
                 {doc.backgroundLocked ? ' · Locked' : ''}
               </p>
             </div>

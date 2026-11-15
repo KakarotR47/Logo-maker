@@ -258,6 +258,13 @@ function sanitizeExportedSvgDom(svgNode: SVGSVGElement) {
     g.removeAttribute('data-layer-id');
   });
 
+  svgNode.querySelectorAll('g[data-artwork-root]').forEach((g) => {
+    g.removeAttribute('data-artwork-root');
+  });
+  svgNode.querySelectorAll('g[data-texture-overlay]').forEach((g) => {
+    g.removeAttribute('data-texture-overlay');
+  });
+
   svgNode.querySelectorAll('text').forEach((txt) => {
     txt.removeAttribute('style');
   });
@@ -277,9 +284,11 @@ function measureDocumentArtBounds(
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  const layerGroups = Array.from(svgNode.querySelectorAll(':scope > g[data-layer-id]'));
-  visibleLayers.forEach((layer, idx) => {
-    const groupEl = layerGroups[idx] as SVGGraphicsElement | undefined;
+  const layerGroups = Array.from(svgNode.querySelectorAll('g[data-layer-id]'));
+  visibleLayers.forEach((layer) => {
+    const groupEl = layerGroups.find(
+      (g) => g.getAttribute('data-layer-id') === layer.id
+    ) as SVGGraphicsElement | undefined;
     let measured = false;
     if (groupEl && typeof groupEl.getBBox === 'function') {
       try {

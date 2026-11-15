@@ -25,6 +25,7 @@ import {
   LogoDocument,
   LogoLayer,
   PathLayer,
+  SurfaceTextureConfig,
   TextLayer,
 } from '../types/logo';
 import {
@@ -43,7 +44,7 @@ import {
   refitPathLayerAfterNodeEdit,
   serializeSubpathsToPathData,
 } from '../utils/pathGeometry';
-import { CanvasLayerNode } from './CanvasLayerRenderer';
+import { LogoSceneLayers } from './CanvasLayerRenderer';
 import { FloatingContextToolbar } from './FloatingContextToolbar';
 
 export type CanvasToolMode = 'select' | 'pen' | 'nodes' | 'per-letter';
@@ -89,6 +90,8 @@ interface LogoCanvasEditorProps {
   onBatchUpdateSelected: (patch: Partial<LogoLayer>) => void;
   onBooleanCombine?: (op: BooleanOpKind) => void;
   onCreateClippingMask?: () => void;
+  onKnockoutSelected?: () => void;
+  onUpdateSurfaceTexture?: (next: SurfaceTextureConfig) => void;
   editorNotice?: string | null;
   onApplyFontPairing: (pairing: FontPairing) => void;
   onReorderLayer: (id: string, dir: 'up' | 'down') => void;
@@ -140,6 +143,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
   onBatchUpdateSelected,
   onBooleanCombine,
   onCreateClippingMask,
+  onKnockoutSelected,
+  onUpdateSurfaceTexture,
   editorNotice,
   onApplyFontPairing,
   onReorderLayer,
@@ -1641,6 +1646,8 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               onBatchUpdateSelected={onBatchUpdateSelected}
               onBooleanCombine={onBooleanCombine}
               onCreateClippingMask={onCreateClippingMask}
+              onKnockoutSelected={onKnockoutSelected}
+              onUpdateSurfaceTexture={onUpdateSurfaceTexture}
               onApplyFontPairing={onApplyFontPairing}
               onDuplicateSelected={onDuplicateSelected}
               onDeleteSelected={onDeleteSelected}
@@ -1693,6 +1700,7 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
           <svg
             ref={svgRef}
             viewBox={`0 0 ${doc.width} ${doc.height}`}
+            style={{ isolation: 'isolate' }}
             className={`h-full w-full select-none block touch-none ${
               canvasToolMode === 'pen' ? 'cursor-crosshair' : ''
             }`}
@@ -1906,42 +1914,41 @@ export const LogoCanvasEditor: React.FC<LogoCanvasEditorProps> = ({
               );
             })()}
 
-            {/* Render All Scene Layers */}
-            {doc.layers.map((layer) => (
-              <g
-                key={layer.id}
-                onPointerDown={(e) => {
-                  if (canvasToolMode === 'pen') return;
-                  startLayerDrag(e, layer);
-                }}
-                onDoubleClick={(e) => {
-                  if (canvasToolMode === 'pen') return;
-                  e.stopPropagation();
-                  if (layer.type === 'text' && !layer.locked && canvasToolMode === 'select') {
-                    setEditingTextId(layer.id);
-                  } else if (layer.type === 'path' && !layer.locked) {
-                    onSelectLayers([layer.id]);
-                    onChangeToolMode?.('nodes');
-                  }
-                }}
-                style={{
-                  cursor:
-                    canvasToolMode === 'pen'
-                      ? 'crosshair'
-                      : layer.locked
-                        ? 'not-allowed'
-                        : 'move',
-                  touchAction: 'none',
-                }}
-              >
-                <CanvasLayerNode
-                  layer={layer}
-                  docBg={doc.transparentBackground ? 'transparent' : doc.backgroundColor}
-                  idPrefix="canvas"
-                  allLayers={doc.layers}
-                />
-              </g>
-            ))}
+            {/* Render All Scene Layers with Knockout Masks, Blend Modes & Surface Textures */}
+            <LogoSceneLayers
+              doc={doc}
+              docBg={doc.transparentBackground ? 'transparent' : doc.backgroundColor}
+              idPrefix="canvas"
+              wrapInteractiveLayer={(layer, node) => (
+                <g
+                  onPointerDown={(e) => {
+                    if (canvasToolMode === 'pen') return;
+                    startLayerDrag(e, layer);
+                  }}
+                  onDoubleClick={(e) => {
+                    if (canvasToolMode === 'pen') return;
+                    e.stopPropagation();
+                    if (layer.type === 'text' && !layer.locked && canvasToolMode === 'select') {
+                      setEditingTextId(layer.id);
+                    } else if (layer.type === 'path' && !layer.locked) {
+                      onSelectLayers([layer.id]);
+                      onChangeToolMode?.('nodes');
+                    }
+                  }}
+                  style={{
+                    cursor:
+                      canvasToolMode === 'pen'
+                        ? 'crosshair'
+                        : layer.locked
+                          ? 'not-allowed'
+                          : 'move',
+                    touchAction: 'none',
+                  }}
+                >
+                  {node}
+                </g>
+              )}
+            />
 
             {/* Print Bleed Overlay (3mm ≈ 12px Trim Frame & Crop Marks) */}
             {showBleed && (() => {

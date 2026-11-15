@@ -60,7 +60,11 @@ export async function tryConvertTextLayerToPath(
 ): Promise<LogoLayer> {
   const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
   if (!font) return layer;
-  return convertTextLayerToPathWithFont(layer, font, allLayers);
+  try {
+    return convertTextLayerToPathWithFont(layer, font, allLayers);
+  } catch {
+    return layer;
+  }
 }
 
 /**
@@ -74,7 +78,11 @@ export async function convertTextLayerToPath(
 ): Promise<PathLayer> {
   const font = await loadOpentypeFont(layer.fontId, layer.fontFamily);
   if (font) {
-    return convertTextLayerToPathWithFont(layer, font, allLayers);
+    try {
+      return convertTextLayerToPathWithFont(layer, font, allLayers);
+    } catch {
+      // Fall back to geometric placeholder bounds if TTF tables fail to outline
+    }
   }
   const displayText = layer.uppercase ? layer.text.toUpperCase() : layer.text;
   const fontSize = Math.max(8, layer.fontSize);
@@ -107,6 +115,9 @@ export async function convertTextLayerToPath(
     flipX: layer.flipX,
     flipY: layer.flipY,
     opacity: layer.opacity,
+    blendMode: layer.blendMode,
+    isKnockout: layer.isKnockout,
+    knockoutTargetId: layer.knockoutTargetId,
     visible: layer.visible,
     locked: layer.locked,
     groupId: layer.groupId,
@@ -121,6 +132,28 @@ export async function convertTextLayerToPath(
     sourceViewBox: { width: layer.width, height: layer.height },
     sourceText: layer.text,
   };
+}
+
+function safeStringToGlyphs(font: opentype.Font, text: string): opentype.Glyph[] {
+  try {
+    return font.stringToGlyphs(text);
+  } catch {
+    // Some Google Fonts use GSUB lookupType 6 substFormat 2 in ccmp/calt tables
+    // which opentype.js Bidi shaper does not support yet; map directly via cmap.
+    return Array.from(text).map((ch) => font.charToGlyph(ch));
+  }
+}
+
+function safeGetKerningValue(
+  font: opentype.Font,
+  left: opentype.Glyph,
+  right: opentype.Glyph
+): number {
+  try {
+    return font.getKerningValue(left, right) || 0;
+  } catch {
+    return 0;
+  }
 }
 
 function convertTextLayerToPathWithFont(
@@ -157,7 +190,7 @@ function convertTextLayerToPathWithFont(
     const pathD = customPath ? customPath.localD : buildWarpArcPathD(layer).d;
     const sampled = sampleSvgPath(pathD);
     const line = lines[0] ?? '';
-    const glyphs = font.stringToGlyphs(line);
+    const glyphs = safeStringToGlyphs(font, line);
 
     let totalWidth = 0;
     const items: Array<{
@@ -174,7 +207,7 @@ function convertTextLayerToPathWithFont(
     for (let i = 0; i < glyphs.length; i++) {
       const glyph = glyphs[i];
       const otKern =
-        i > 0 ? font.getKerningValue(glyphs[i - 1], glyph) * fontScale : 0;
+        i > 0 ? safeGetKerningValue(font, glyphs[i - 1], glyph) * fontScale : 0;
       if (i > 0) totalWidth += otKern;
 
       const baseAdv = (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * fontScale;
@@ -250,7 +283,7 @@ function convertTextLayerToPathWithFont(
         return;
       }
       const baselineY = firstY + lineIdx * lineAdvance;
-      const glyphs = font.stringToGlyphs(line);
+      const glyphs = safeStringToGlyphs(font, line);
       let lineWidth = 0;
       const items: Array<{
         glyph: opentype.Glyph;
@@ -266,7 +299,7 @@ function convertTextLayerToPathWithFont(
         const gIdx = globalCharOffset + i;
         const glyph = glyphs[i];
         const otKern =
-          i > 0 ? font.getKerningValue(glyphs[i - 1], glyph) * fontScale : 0;
+          i > 0 ? safeGetKerningValue(font, glyphs[i - 1], glyph) * fontScale : 0;
         if (i > 0) lineWidth += otKern;
 
         const baseAdv = (glyph.advanceWidth ?? font.unitsPerEm * 0.5) * fontScale;
@@ -336,6 +369,9 @@ function convertTextLayerToPathWithFont(
     flipX: layer.flipX,
     flipY: layer.flipY,
     opacity: layer.opacity,
+    blendMode: layer.blendMode,
+    isKnockout: layer.isKnockout,
+    knockoutTargetId: layer.knockoutTargetId,
     visible: layer.visible,
     locked: layer.locked,
     groupId: layer.groupId,

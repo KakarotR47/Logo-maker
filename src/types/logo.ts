@@ -174,11 +174,47 @@ export type ClipMaskShapeKind =
   | 'arch'
   | 'custom';
 
+export type BlendMode =
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-burn'
+  | 'difference';
+
+export type SurfaceTexturePreset =
+  | 'none'
+  | 'vintage-grit'
+  | 'halftone-dots'
+  | 'brushed-metal'
+  | 'paper-grain';
+
+export interface SurfaceTextureConfig {
+  enabled: boolean;
+  preset: SurfaceTexturePreset;
+  /** 0.1..1.0 strength */
+  intensity: number;
+  /** 0.4..2.5 scale factor */
+  scale: number;
+  /** 0..180 pattern angle in degrees */
+  angle?: number;
+  /** Deterministic seed for grit / grain */
+  seed?: number;
+  /** 'distress' punches alpha texture holes through artwork; 'overlay' applies sheen/grain over artwork; 'canvas' applies texture over full artboard */
+  mode?: 'distress' | 'overlay' | 'canvas';
+  /** Inverts the distress texture mask */
+  inverted?: boolean;
+}
+
 export interface LayerClipMask {
   enabled: boolean;
   shape: ClipMaskShapeKind;
   cornerRadius?: number;
   scale?: number; // 0.35..1.25
+  /** When true, punches the clip shape out as a transparent hole inside the layer */
+  inverted?: boolean;
   customPaths?: string[];
   customViewBox?: { width: number; height: number };
 }
@@ -194,6 +230,11 @@ export interface LayerBase {
   flipX?: boolean;
   flipY?: boolean;
   opacity: number;
+  blendMode?: BlendMode;
+  /** Non-destructive knockout: punches a transparent hole through the layer underneath */
+  isKnockout?: boolean;
+  /** Optional explicit layer ID underneath to punch through */
+  knockoutTargetId?: string;
   visible: boolean;
   locked: boolean;
   groupId?: string;
@@ -356,6 +397,7 @@ export interface LogoDocument {
   backgroundColor: string;
   transparentBackground: boolean;
   backgroundLocked?: boolean;
+  surfaceTexture?: SurfaceTextureConfig;
   groups?: LayerGroup[];
   layers: LogoLayer[];
 }

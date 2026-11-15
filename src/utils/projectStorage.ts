@@ -108,6 +108,11 @@ export function cloneDocumentForProject(
     return { ...g, id: freshId };
   });
 
+  const layerIdMap = new Map<string, string>();
+  cloned.layers.forEach((layer) => {
+    layerIdMap.set(layer.id, nextLayerId(layer.type));
+  });
+
   return {
     ...cloned,
     id: nextLayerId('doc'),
@@ -115,8 +120,20 @@ export function cloneDocumentForProject(
     groups: remappedGroups,
     layers: cloned.layers.map((layer) => ({
       ...layer,
-      id: nextLayerId(layer.type),
+      id: layerIdMap.get(layer.id) ?? nextLayerId(layer.type),
       groupId: layer.groupId ? (groupIdMap.get(layer.groupId) ?? layer.groupId) : undefined,
+      knockoutTargetId: layer.knockoutTargetId
+        ? (layerIdMap.get(layer.knockoutTargetId) ?? layer.knockoutTargetId)
+        : undefined,
+      ...(layer.type === 'text' && layer.textPath?.targetLayerId
+        ? {
+            textPath: {
+              ...layer.textPath,
+              targetLayerId:
+                layerIdMap.get(layer.textPath.targetLayerId) ?? layer.textPath.targetLayerId,
+            },
+          }
+        : {}),
     })),
   };
 }

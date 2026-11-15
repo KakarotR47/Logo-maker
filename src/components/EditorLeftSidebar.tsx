@@ -18,6 +18,7 @@ import {
   Shapes,
   Shuffle,
   Sparkles,
+  Stamp,
   Trash2,
   Type,
   Unlock,
@@ -44,6 +45,7 @@ import {
   LogoLayer,
   LogoStylePreset,
   ShapeKind,
+  SurfaceTextureConfig,
   TextLayer,
 } from '../types/logo';
 import { AiBrandBrainstormItem } from '../utils/aiApi';
@@ -65,6 +67,7 @@ import {
   ProTemplateSpec,
 } from '../utils/templateLibrary';
 import { AiMagicPanel, TracedSymbolPayload } from './AiMagicPanel';
+import { FinishTexturePanel } from './FinishTexturePanel';
 import { MonogramPanel } from './MonogramPanel';
 import { TextEffectsStudio } from './TextEffectsStudio';
 
@@ -73,6 +76,7 @@ export type SidebarToolTab =
   | 'elements'
   | 'text'
   | 'monogram'
+  | 'finish'
   | 'brand'
   | 'ai'
   | 'uploads'
@@ -119,6 +123,7 @@ interface EditorLeftSidebarProps {
   onReorderLayer: (id: string, dir: 'up' | 'down') => void;
   onDuplicateLayer: (id: string) => void;
   onDeleteLayer: (id: string) => void;
+  onUpdateSurfaceTexture?: (next: SurfaceTextureConfig) => void;
   penMode?: boolean;
   perLetterMode?: boolean;
   onTogglePenTool?: () => void;
@@ -136,6 +141,7 @@ const RAIL_ITEMS: Array<{
   { id: 'elements', label: 'Elements', icon: Shapes },
   { id: 'text', label: 'Text', icon: Type },
   { id: 'monogram', label: 'Monogram', icon: Crown },
+  { id: 'finish', label: 'Finish', icon: Stamp },
   { id: 'brand', label: 'Brand Kit', icon: Palette },
   { id: 'uploads', label: 'Uploads', icon: Upload },
   { id: 'layers', label: 'Layers', icon: Layers },
@@ -175,6 +181,7 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
   onReorderLayer,
   onDuplicateLayer,
   onDeleteLayer,
+  onUpdateSurfaceTexture,
   penMode = false,
   perLetterMode = false,
   onTogglePenTool,
@@ -1132,6 +1139,16 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
             )}
 
             {/* ============================================================== */}
+            {/* 3C. FINISH & TEXTURE TAB (Distress, Halftone, Metal, Paper)    */}
+            {/* ============================================================== */}
+            {activeTab === 'finish' && onUpdateSurfaceTexture && (
+              <FinishTexturePanel
+                texture={doc.surfaceTexture}
+                onChange={onUpdateSurfaceTexture}
+              />
+            )}
+
+            {/* ============================================================== */}
             {/* 4. BRAND TAB (Triad, Magic Recolor, 4 Variations, Palettes)    */}
             {/* ============================================================== */}
             {activeTab === 'brand' && (
@@ -1388,7 +1405,15 @@ export const EditorLeftSidebar: React.FC<EditorLeftSidebarProps> = ({
                           </p>
                           <p className="text-[10px] uppercase tracking-wider text-slate-400">
                             {layer.type}
-                            {layer.clipMask?.enabled ? ' · Masked' : ''}
+                            {layer.isKnockout ? ' · Knockout' : ''}
+                            {layer.blendMode && layer.blendMode !== 'normal'
+                              ? ` · ${layer.blendMode}`
+                              : ''}
+                            {layer.clipMask?.enabled
+                              ? layer.clipMask.inverted
+                                ? ' · Cutout'
+                                : ' · Masked'
+                              : ''}
                             {layer.flipX || layer.flipY ? ' · Flipped' : ''}
                           </p>
                         </button>

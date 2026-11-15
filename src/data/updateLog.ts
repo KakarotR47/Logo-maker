@@ -19,6 +19,40 @@ export interface BuildReleaseNote {
 
 export const STUDIO_UPDATE_LOG: BuildReleaseNote[] = [
   {
+    id: 'build-20',
+    buildLabel: 'Build 20',
+    title: 'Phase 21: Compositing, Masks & Surface Textures',
+    dateLabel: 'November 2026',
+    summary:
+      'Added full SVG Canvas Blend Modes, non-destructive Alpha & Inverted Knockout/Cutout Masks that punch true transparent holes through underlying layers, and a reversible Finish & Texture studio for Vintage Grit, Halftone Dots, Brushed Metal, and Paper Grain.',
+    changes: [
+      {
+        kind: 'added',
+        area: 'Canvas Blend Modes',
+        title: '8 Live Compositing Modes (Multiply, Screen, Overlay, Color Burn & More)',
+        details:
+          'Added Blend Mode dropdown controls on single and multi-selected layers (Normal, Multiply, Screen, Overlay, Darken, Lighten, Color Burn, Difference) with isolated SVG artboard stacking for clean browser & export rendering.',
+        filesEdited: ['src/types/logo.ts', 'src/components/CanvasLayerRenderer.tsx', 'src/components/FloatingContextToolbar.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Knockout & Cutout Masks',
+        title: 'Non-Destructive Alpha Knockouts & Inverted Clip Masks',
+        details:
+          'Select any shape or text layer above another element and click Knockout / Cutout (single or multi-select) to punch a true transparent hole through the layer underneath, or invert any Clip Mask into a hole.',
+        filesEdited: ['src/utils/surfaceTextures.ts', 'src/components/CanvasLayerRenderer.tsx', 'src/components/RightLayersDrawer.tsx', 'src/App.tsx'],
+      },
+      {
+        kind: 'added',
+        area: 'Finish & Texture Panel',
+        title: 'Non-Destructive Distress, Halftone, Brushed Metal & Paper Grain',
+        details:
+          'Added a Finish left-rail tab and Artboard Finish & Texture popover with deterministic vector distress masks, halftone dot screens, directional brushed metal sheen, and cotton paper grain that export cleanly to SVG, PNG & PDF.',
+        filesEdited: ['src/utils/surfaceTextures.ts', 'src/components/FinishTexturePanel.tsx', 'src/components/EditorLeftSidebar.tsx', 'src/utils/svgExport.ts'],
+      },
+    ],
+  },
+  {
     id: 'build-19',
     buildLabel: 'Build 19',
     title: 'Phase 20: Pro OpenType Typography & Text-on-Path',

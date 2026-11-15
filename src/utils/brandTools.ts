@@ -24,10 +24,19 @@ export interface LogoVariationEntry {
 }
 
 function deepCloneLayersFresh(layers: LogoLayer[]): LogoLayer[] {
+  const idMap = new Map<string, string>();
+  for (const l of layers) {
+    idMap.set(l.id, nextLayerId(l.type));
+  }
+
   return layers.map((l) => {
+    const freshId = idMap.get(l.id) ?? nextLayerId(l.type);
     const base = {
       ...l,
-      id: nextLayerId(l.type),
+      id: freshId,
+      knockoutTargetId: l.knockoutTargetId
+        ? idMap.get(l.knockoutTargetId) ?? l.knockoutTargetId
+        : undefined,
       shadow: { ...l.shadow },
       fillGradient: l.fillGradient
         ? {
@@ -59,7 +68,14 @@ function deepCloneLayersFresh(layers: LogoLayer[]): LogoLayer[] {
         ...base,
         textEffect: l.textEffect ? { ...l.textEffect } : undefined,
         textWarp: l.textWarp ? { ...l.textWarp } : undefined,
-        textPath: l.textPath ? { ...l.textPath } : undefined,
+        textPath: l.textPath
+          ? {
+              ...l.textPath,
+              targetLayerId: l.textPath.targetLayerId
+                ? idMap.get(l.textPath.targetLayerId) ?? l.textPath.targetLayerId
+                : undefined,
+            }
+          : undefined,
         letterKerning: l.letterKerning ? { ...l.letterKerning } : undefined,
         letterTransforms: clonedTransforms,
       };
