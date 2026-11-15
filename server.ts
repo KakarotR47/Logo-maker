@@ -85,7 +85,7 @@ async function startServer() {
     res.json({
       configured: Boolean(process.env.GEMINI_API_KEY?.trim()),
       imageModel: 'gemini-3.1-flash-lite-image',
-      textModel: 'gemini-4-hydrogen',
+      textModel: 'gemini-3.8-flash',
     });
   });
 
@@ -294,7 +294,7 @@ async function startServer() {
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.8-flash',
         contents: [
           `Design 3 distinct logo identity directions based on this creative brief:`,
           `Prompt: ${prompt}`,
@@ -345,7 +345,7 @@ async function startServer() {
       const suggestions = JSON.parse(rawText);
       res.json({
         suggestions: Array.isArray(suggestions) ? suggestions.slice(0, 3) : [],
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.8-flash',
       });
     } catch (err) {
       const parsed = parseGeminiError(err);
@@ -379,7 +379,7 @@ async function startServer() {
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.8-flash',
         contents: [
           `Create 6 distinct layout and color-harmony logo remixes for the existing brand "${brandName}".`,
           tagline ? `Tagline: ${tagline}` : '',
@@ -438,7 +438,7 @@ async function startServer() {
       const remixes = JSON.parse(rawText);
       res.json({
         remixes: Array.isArray(remixes) ? remixes.slice(0, 6) : [],
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.8-flash',
       });
     } catch (err) {
       const parsed = parseGeminiError(err);
@@ -470,7 +470,7 @@ async function startServer() {
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.8-flash',
         contents: [
           `Brainstorm 5 original, memorable brand identities for this concept:`,
           `Concept / Keywords: ${topic}`,
@@ -533,7 +533,7 @@ async function startServer() {
       const brands = JSON.parse(rawText);
       res.json({
         brands: Array.isArray(brands) ? brands.slice(0, 5) : [],
-        model: 'gemini-4-hydrogen',
+        model: 'gemini-3.8-flash',
       });
     } catch (err) {
       const parsed = parseGeminiError(err);
